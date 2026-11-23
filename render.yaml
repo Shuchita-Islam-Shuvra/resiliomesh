@@ -1,0 +1,21 @@
+# Render Blueprint: one web service (API + in-process workflow worker)
+services:
+  - type: web
+    name: resiliomesh-api
+    runtime: python
+    rootDir: backend
+    plan: free
+    buildCommand: pip install -r requirements.txt && python -m app.ml.train
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.10
+      - key: SUPABASE_URL
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+      - key: WORKER_IN_PROCESS
+        value: "true"
