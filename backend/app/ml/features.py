@@ -1,0 +1,59 @@
+"""Feature definitions shared by training and inference."""
+from __future__ import annotations
+
+FEATURES: list[str] = [
+    "rain_past_24h_mm",        # observed rainfall, previous 24h
+    "rain_next_24h_mm",        # forecast rainfall, next 24h
+    "max_hourly_mm",           # peak hourly intensity (forecast)
+    "drainage_capacity_mm_hr", # design capacity of ward drainage
+    "impervious_pct",          # % sealed surface
+    "elevation_m",             # mean ward elevation above MSL
+    "asset_condition",         # 0-100, condition of linked/nearby drainage assets
+    "blocked_assets",          # count of blocked assets in ward
+    "historical_events_10y",   # past waterlogging events in ward
+    "recent_reports_6h",       # citizen reports within 300 m in last 6 h
+    "monsoon",                 # 1 if Jun-Sep, 0.5 May/Oct, else 0
+]
+
+FEATURE_LABELS: dict[str, str] = {
+    "rain_past_24h_mm": "Rainfall last 24h",
+    "rain_next_24h_mm": "Forecast rain next 24h",
+    "max_hourly_mm": "Peak hourly intensity",
+    "drainage_capacity_mm_hr": "Drainage capacity",
+    "impervious_pct": "Impervious surface",
+    "elevation_m": "Ground elevation",
+    "asset_condition": "Drainage asset condition",
+    "blocked_assets": "Blocked drains in ward",
+    "historical_events_10y": "Historical waterlogging events",
+    "recent_reports_6h": "Nearby reports (6h)",
+    "monsoon": "Monsoon season",
+}
+
+
+def monsoon_factor(month: int) -> float:
+    if 6 <= month <= 9:
+        return 1.0
+    if month in (5, 10):
+        return 0.5
+    return 0.0
+
+
+def clean_features(raw: dict) -> dict[str, float]:
+    """Coerce + impute missing values with conservative defaults (never crash on None)."""
+    defaults = {
+        "rain_past_24h_mm": 0.0, "rain_next_24h_mm": 0.0, "max_hourly_mm": 0.0,
+        "drainage_capacity_mm_hr": 25.0, "impervious_pct": 80.0, "elevation_m": 5.5,
+        "asset_condition": 60.0, "blocked_assets": 0.0, "historical_events_10y": 20.0,
+        "recent_reports_6h": 0.0, "monsoon": 0.0,
+    }
+    out: dict[str, float] = {}
+    for f in FEATURES:
+        v = raw.get(f)
+        try:
+            v = float(v)
+            if v != v or v < 0 and f != "elevation_m":  # NaN or negative
+                v = defaults[f]
+        except (TypeError, ValueError):
+            v = defaults[f]
+        out[f] = v
+    return out

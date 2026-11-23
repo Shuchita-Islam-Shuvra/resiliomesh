@@ -1,0 +1,1 @@
+{"version": "xgb-risk-1.2", "metrics": {"mae": 3.328, "r2": 0.904, "n_train": 19200, "n_test": 4800, "best_iteration": 151}}
