@@ -1,6 +1,6 @@
 """Create demo accounts + realistic sample operations data.
 
-Prereqs: migrations 001-005 and supabase/seed.sql already applied.
+Prereqs: migrations 001-008 and supabase/seed.sql already applied.
 
     cd backend
     # backend/.env must contain SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, DATABASE_URL
@@ -39,11 +39,12 @@ ORG = {
 }
 # sign-in IDs shown on the login page's demo box (City Officer / Field Worker / Admin)
 STAFF_IDS = {
-    "admin@resiliomesh.demo": "ADM-001", "officer@resiliomesh.demo": "DSCC-OFF-01", "officer2@resiliomesh.demo": "DNCC-OFF-02",
+    "admin@resiliomesh.demo": "ADM-001", "admin2@resiliomesh.demo": "ADM-002", "officer@resiliomesh.demo": "DSCC-OFF-01", "officer2@resiliomesh.demo": "DNCC-OFF-02",
     "field1@resiliomesh.demo": "FW-001", "field2@resiliomesh.demo": "FW-002", "field3@resiliomesh.demo": "FW-003",
 }
 USERS = [
     ("admin@resiliomesh.demo", "Farhana Rahman", "admin", "ops", None),
+    ("admin2@resiliomesh.demo", "Kamal Hossain", "admin", "ops", None),       # second approver (two-person rule)
     ("officer@resiliomesh.demo", "Tanvir Hasan", "city_officer", "south", "DSCC-04"),
     ("officer2@resiliomesh.demo", "Nusrat Jahan", "city_officer", "north", "DNCC-05"),
     ("ngo@resiliomesh.demo", "Sabrina Akter", "ngo_coordinator", "shobar", "DSCC-01"),
@@ -54,6 +55,8 @@ USERS = [
     ("citizen@resiliomesh.demo", "Arif Chowdhury", "citizen", None, "DSCC-02"),
     ("citizen2@resiliomesh.demo", "Lamia Sultana", "citizen", None, "DNCC-02"),
 ]
+
+DEMO_PHONE = {email: f"+88017000002{i:02d}" for i, (email, *_rest) in enumerate(USERS)}
 
 # realistic report templates: (ward, category, title, description, depth, people, severity)
 REPORTS = [
@@ -123,6 +126,14 @@ def main() -> None:
                     conn.execute("update profiles set employee_id=%s where id=%s", (STAFF_IDS[email], ids[email]))
                 except psycopg.errors.UndefinedColumn:
                     conn.execute("rollback to savepoint sid")
+            # demo-only: a +880 number marked as SMS-verified so the demo still works when
+            # security_settings.require_phone_verification is switched on (migration 008)
+            conn.execute("savepoint phone")
+            try:
+                conn.execute("update profiles set phone=%s, phone_verified_at=coalesce(phone_verified_at, now()) where id=%s",
+                             (DEMO_PHONE[email], ids[email]))
+            except psycopg.errors.UndefinedColumn:
+                conn.execute("rollback to savepoint phone")
         conn.commit()
 
         if conn.execute("select count(*) n from incidents where title like 'DEMO:%%' or reporter_id = any(%s::uuid[])",

@@ -42,6 +42,8 @@ export default function RegisterPage() {
     supabase.rpc('rm_public_organizations').then(({ data }) => setOrgs(data || []))
   }, [])
   const roleOrgs = useMemo(() => orgs.filter((o) => (ROLE_ORG_TYPES[role] || []).includes(o.type)), [orgs, role])
+  const chosenOrg = roleOrgs.find((o) => o.id === v.organization_id) || null
+  const officialDomains = chosenOrg?.email_domains?.length ? chosenOrg.email_domains.map((d) => `@${d}`).join(' or ') : null
 
   if (session && !busy && !done) return <Navigate to="/dashboard" replace />
 
@@ -60,7 +62,7 @@ export default function RegisterPage() {
 
   const submit = async (e) => {
     e.preventDefault()
-    const errs = validateRegister(v, role)
+    const errs = validateRegister(v, role, { org: chosenOrg, orgs })
     setErrors(errs)
     if (Object.keys(errs).length) {
       setMsg({ tone: 'error', text: `Please fix ${Object.keys(errs).length} field${Object.keys(errs).length > 1 ? 's' : ''} highlighted below.` })
@@ -99,7 +101,9 @@ export default function RegisterPage() {
         tone: 'error',
         text: /registered|already/i.test(err.message) ? 'An account with this email already exists.'
           : /rate limit|too many/i.test(err.message) ? 'Too many sign-up attempts. Please wait a few minutes.'
-          : /database error/i.test(err.message) ? 'Some details were rejected by the server. Check your phone number and try again.'
+          : /database error/i.test(err.message) ? (staff
+            ? 'The server rejected these details. Staff must register with their official organisation e-mail address — check the e-mail and organisation.'
+            : 'Some details were rejected by the server. Check your details and try again.')
           : err.message,
       })
     } finally { setBusy(false) }
@@ -128,9 +132,16 @@ export default function RegisterPage() {
           {done.needsConfirm && <Alert tone="success" title="Confirm your email">We sent a confirmation link to <b>{v.email.trim()}</b>. Open it to activate your account.</Alert>}
           {staff && (
             <Alert tone="info" title={`${R.label} access is pending approval`}>
-              <span className="flex gap-2"><Clock className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />An administrator will verify your details. Until it is approved you can sign in on the <b>Citizen</b> tab; once approved, sign in on the <b>{R.label}</b> tab.</span>
+              <span className="flex gap-2"><Clock className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />An administrator checks your details against the official staff roster{role === 'ngo_coordinator' ? ' and the NGO Affairs Bureau registry' : ''}.</span>
+              <ol className="mt-2 list-decimal space-y-0.5 pl-5">
+                {done.needsConfirm && <li>Open the confirmation link in your e-mail.</li>}
+                <li>Sign in on the <b>Citizen</b> tab and open <b>Account &amp; security</b>.</li>
+                <li>Verify your mobile number by SMS and upload your office ID card or appointment letter.</li>
+                <li>Once approved, sign in on the <b>{R.label}</b> tab with your {role === 'ngo_coordinator' ? 'NGO' : 'ID'}.</li>
+              </ol>
             </Alert>
           )}
+          {!staff && <Alert tone="info">After signing in, verify your mobile number under <b>Account &amp; security</b> — verified reports are trusted faster.</Alert>}
           <Link to={`/login?role=${staff ? role : 'citizen'}`} className="inline-flex items-center gap-2 rounded-full bg-brand-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-700">
             <LogIn className="h-4 w-4" aria-hidden />Go to sign in
           </Link>
@@ -167,11 +178,12 @@ export default function RegisterPage() {
 
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Full name" error={errors.full_name} required>{(a) => <Input {...a} value={v.full_name} onChange={set('full_name')} autoComplete="name" maxLength={100} />}</Field>
-          <Field label={staff ? 'Work email' : 'Email'} error={errors.email} required hint={staff ? 'Official organisation email if you have one' : undefined}>
+          <Field label={staff ? 'Official work email' : 'Email'} error={errors.email} required
+            hint={!staff ? undefined : officialDomains ? `Must be your ${officialDomains} address` : role === 'city_officer' ? 'Your city corporation address (e.g. @dncc.gov.bd)' : role === 'ngo_coordinator' ? 'Your organisation address — public mail (Gmail, Yahoo…) is not accepted' : 'Official organisation email if you have one'}>
             {(a) => <Input {...a} type="email" inputMode="email" value={v.email} onChange={set('email')} autoComplete="email" maxLength={254} />}
           </Field>
-          <Field label={staff ? 'Mobile' : 'Mobile (optional)'} error={errors.phone} required={staff}>
-            {(a) => <Input {...a} type="tel" inputMode="tel" value={v.phone} onChange={set('phone')} placeholder="+8801XXXXXXXXX" autoComplete="tel" maxLength={16} />}
+          <Field label="Mobile (Bangladesh)" error={errors.phone} required hint="+880 numbers only — you'll confirm it with an SMS code">
+            {(a) => <Input {...a} type="tel" inputMode="tel" value={v.phone} onChange={set('phone')} placeholder="01712345678" autoComplete="tel" maxLength={16} />}
           </Field>
           {role === 'citizen' && wardSelect('Home area (optional)', false, 'Shows you the flood risk where you live')}
         </div>

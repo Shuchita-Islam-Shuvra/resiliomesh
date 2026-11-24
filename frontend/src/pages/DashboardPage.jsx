@@ -134,16 +134,19 @@ function Queue({ title, items, empty }) {
 }
 
 function CitizenDashboard() {
-  const { profile } = useAuth()
+  const { profile, security } = useAuth()
   const [mine, setMine] = useState(null)
   const [ward, setWard] = useState(null)
+  const [request, setRequest] = useState(null)
   const load = useCallback(async () => {
-    const [{ data }, { data: w }] = await Promise.all([
+    const [{ data }, { data: w }, { data: rq }] = await Promise.all([
       supabase.from('incidents').select('id,reference_code,title,status,category,created_at,risk_level,risk_score').eq('reporter_id', profile.id).order('created_at', { ascending: false }).limit(20),
       supabase.rpc('ward_risk_summary'),
+      supabase.from('role_requests').select('requested_role,status').eq('user_id', profile.id).eq('status', 'pending').limit(1).maybeSingle(),
     ])
     setMine(data || [])
     setWard((w || []).find((x) => x.ward_id === profile.ward_id) || null)
+    setRequest(rq || null)
   }, [profile.id, profile.ward_id])
   useEffect(() => { load() }, [load])
   useRealtime('incidents', load, { filter: `reporter_id=eq.${profile.id}` })
@@ -158,6 +161,18 @@ function CitizenDashboard() {
         <StatCard label="Team dispatched" value={count(['approved', 'in_progress'])} icon={Workflow} tone="sky" />
         <StatCard label="Resolved" value={count(['resolved'])} icon={CheckCircle2} tone="green" />
       </div>
+      {request && (
+        <Alert tone="info" className="mt-5" title="Your staff access request is pending">
+          Administrators verify you against the official staff roster. Speed it up: verify your mobile number and upload your office ID card or appointment letter.{' '}
+          <Link to="/account" className="font-semibold underline">Account &amp; security</Link>
+        </Alert>
+      )}
+      {!request && security && !security.phone_verified && (
+        <Alert tone={security.require_phone_verification ? 'warning' : 'info'} className="mt-5" title="Verify your mobile number">
+          {security.require_phone_verification ? 'A verified Bangladeshi mobile number is required before you can submit reports.' : 'Reports from verified numbers are trusted and handled faster.'}{' '}
+          <Link to="/account" className="font-semibold underline">Verify now</Link>
+        </Alert>
+      )}
       {ward && (
         <Alert tone={['high', 'critical'].includes(ward.risk_level) ? 'warning' : 'info'} className="mt-5" title={`Your area: ${ward.name}`}>
           Current waterlogging risk is <strong>{ward.risk_level}</strong>. {['high', 'critical'].includes(ward.risk_level) ? 'Avoid low-lying roads and keep drains near your home clear.' : 'No major risk expected right now.'}

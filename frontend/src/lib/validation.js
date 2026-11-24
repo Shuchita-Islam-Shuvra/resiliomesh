@@ -1,6 +1,8 @@
 // Client-side validation (mirrors DB CHECK constraints so users get instant feedback).
+import { emailPolicyError, normalizeBdPhone } from './identity'
+
 export const DHAKA_BOUNDS = { minLat: 23.6, maxLat: 23.95, minLng: 90.25, maxLng: 90.55 }
-const PHONE = /^\+?[0-9]{10,14}$/
+const BD_PHONE_MSG = 'Enter a Bangladeshi mobile number, e.g. 01712345678'
 
 export function validateReport(v) {
   const e = {}
@@ -33,7 +35,7 @@ export function validateNeed(v) {
   if (!Number.isInteger(q) || q < 1 || q > 100000) e.quantity = 'Quantity must be a whole number 1–100000'
   const h = Number(v.households)
   if (!Number.isInteger(h) || h < 1 || h > 50000) e.households = 'Households must be 1–50000'
-  if (v.contact_phone && !PHONE.test(v.contact_phone.replace(/[\s-]/g, ''))) e.contact_phone = 'Enter a valid phone, e.g. +8801712345678'
+  if (v.contact_phone && !normalizeBdPhone(v.contact_phone)) e.contact_phone = BD_PHONE_MSG
   return e
 }
 
@@ -51,10 +53,9 @@ export function validateResource(v) {
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/
 const NAME = /^[\p{L}][\p{L}\p{M} .'-]{1,99}$/u
 const EMPLOYEE_ID = /^[A-Za-z0-9/-]{3,30}$/
-// Bangladesh mobile: +8801XXXXXXXXX or 01XXXXXXXXX (operator digit 3–9)
-const BD_MOBILE = /^(?:\+?88)?01[3-9][0-9]{8}$/
 
-export const normalizePhone = (p = '') => p.replace(/[\s-]/g, '')
+/** Bangladeshi mobile in E.164 (+8801XXXXXXXXX); '' when empty; the raw input when it is not a BD mobile. */
+export const normalizePhone = (p = '') => normalizeBdPhone(p) || p.replace(/[\s-]/g, '')
 
 export function validateEmail(email) {
   const s = (email || '').trim()
@@ -91,8 +92,10 @@ export function validatePassword(pw, { email, staff } = {}) {
 /**
  * Role-aware sign-up validation. Optional keys (confirm_password, accept_terms)
  * are only checked when present so older callers keep working.
+ * @param ctx  { org, orgs } — chosen organisation and all public organisations,
+ *             used for the official e-mail domain rule (also enforced by the DB)
  */
-export function validateRegister(v, role = 'citizen') {
+export function validateRegister(v, role = 'citizen', ctx = {}) {
   const e = {}
   const staff = role !== 'citizen'
   const name = (v.full_name || '').trim()
@@ -101,14 +104,20 @@ export function validateRegister(v, role = 'citizen') {
 
   const em = validateEmail(v.email)
   if (em) e.email = em
+  else if (staff && ctx.orgs) {   // needs the organisation list (official domains) to judge
+    const policy = emailPolicyError(v.email, role, ctx.org || null, ctx.orgs || [])
+    if (policy) e.email = policy
+  }
 
   const pw = validatePassword(v.password, { email: v.email, staff })
   if (pw) e.password = pw
   if ('confirm_password' in v && v.confirm_password !== v.password) e.confirm_password = 'Passwords do not match'
 
-  const phone = normalizePhone(v.phone)
-  if (staff && !phone) e.phone = 'Mobile number is required for staff accounts'
-  else if (phone && !(PHONE.test(phone) && (!staff || BD_MOBILE.test(phone)))) e.phone = 'Enter a valid phone, e.g. +8801712345678'
+  // a Bangladeshi mobile is required for everyone: it is verified by SMS code (OTP)
+  if ('phone' in v || staff) {
+    if (!(v.phone || '').trim()) e.phone = staff ? 'Mobile number is required for staff accounts' : 'Mobile number is required'
+    else if (!normalizeBdPhone(v.phone)) e.phone = BD_PHONE_MSG
+  }
 
   if (role === 'city_officer') {
     if (!v.organization_id) e.organization_id = 'Choose your city authority'

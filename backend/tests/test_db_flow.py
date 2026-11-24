@@ -7,54 +7,41 @@ statement is subject to the same RLS policies and RPC checks the browser hits.
 """
 import json
 import os
-import random
 import threading
 import uuid
-from contextlib import contextmanager
 
 import pytest
 
-DSN = os.getenv("TEST_DATABASE_URL")
+from .dbutil import (DSN, SESSIONS, as_user, nearest_ward, new_auth_user, open_session, random_dhaka_point, raw,
+                     verify_staff_session)
+
 pytestmark = pytest.mark.skipif(not DSN, reason="TEST_DATABASE_URL not set")
 
 if DSN:
     import psycopg
-    from psycopg.rows import dict_row
 
 SOUTH = "11111111-1111-1111-1111-111111111102"
 SHOBAR = "11111111-1111-1111-1111-111111111103"
 NODI = "11111111-1111-1111-1111-111111111104"
 
 
-def raw():
-    return psycopg.connect(DSN, row_factory=dict_row, autocommit=True, prepare_threshold=None)
-
-
-@contextmanager
-def as_user(uid):
-    """One transaction executed with the privileges of an end user (like the browser)."""
-    with psycopg.connect(DSN, row_factory=dict_row, prepare_threshold=None) as c:
-        with c.transaction():
-            c.execute("set local role authenticated")
-            c.execute("select set_config('request.jwt.claims', %s, true)",
-                      (json.dumps({"sub": str(uid), "role": "authenticated"}),))
-            yield c
-
-
 @pytest.fixture(scope="module")
 def users():
     ids = {}
     with raw() as c:
+        old = c.execute("select citizen_reports_per_hour h, citizen_reports_per_day d from security_settings where id").fetchone()
+        c.execute("update security_settings set citizen_reports_per_hour = 1000, citizen_reports_per_day = 5000 where id")
         for key, role, org in [("citizen", "citizen", None), ("citizen2", "citizen", None), ("officer", "city_officer", SOUTH),
                                ("admin", "admin", None), ("field", "field_worker", SOUTH),
                                ("ngo", "ngo_coordinator", SHOBAR), ("ngo_b", "ngo_coordinator", SHOBAR)]:
-            uid = str(uuid.uuid4())
             try:
-                c.execute("insert into auth.users(id, email, raw_user_meta_data) values (%s,%s,%s)",
-                          (uid, f"{key}-{uid[:6]}@flow.test", json.dumps({"full_name": f"Flow {key}"})))
+                uid = new_auth_user(c, key)
             except psycopg.Error as e:
                 pytest.skip(f"cannot create auth users in this database: {e}")
             c.execute("update profiles set role=%s, organization_id=%s where id=%s", (role, org, uid))
+            open_session(c, uid)                       # signed in ...
+            if role != "citizen":
+                verify_staff_session(c, uid)           # ... and passed the server-side staff-ID step
             ids[key] = uid
     # make the backend use this database too (workflow engine via PgStore)
     os.environ["DATABASE_URL"] = DSN
@@ -63,17 +50,30 @@ def users():
     db.close_pool()
     yield ids
     db.close_pool()
+    with raw() as c:
+        c.execute("update security_settings set citizen_reports_per_hour = %s, citizen_reports_per_day = %s where id",
+                  (old["h"], old["d"]))
+
+
+def ensure_staff_session(uid):
+    with raw() as c:
+        if str(uid) not in SESSIONS:
+            open_session(c, str(uid))
+        verify_staff_session(c, str(uid))
 
 
 def new_incident(uid, **kw):
+    lat, lng = random_dhaka_point()                    # spread out: avoid geo-duplicate
+    lat, lng = kw.get("lat", lat), kw.get("lng", lng)
+    with raw() as c:
+        ward = nearest_ward(c, lat, lng)               # the pin must belong to the chosen ward
     with as_user(uid) as c:
         return c.execute("""insert into incidents(reporter_id, ward_id, category, title, description, severity_reported,
                              water_depth_cm, people_affected, lat, lng, status, risk_score)
-                            values (%(r)s, 'DSCC-02', 'waterlogging', %(t)s, 'Flow test incident description', 4, 50, 200,
+                            values (%(r)s, %(w)s, 'waterlogging', %(t)s, 'Flow test incident description', 4, 50, 200,
                                     %(lat)s, %(lng)s, %(st)s, %(rs)s) returning *""",
-                         {"r": kw.get("reporter", uid), "t": kw.get("title", "Flow test incident"),
-                          "lat": kw.get("lat", 20.5 + random.random() * 6),     # spread out: avoid geo-duplicate
-                          "lng": kw.get("lng", 88.5 + random.random() * 4),
+                         {"r": kw.get("reporter", uid), "w": ward, "t": kw.get("title", "Flow test incident"),
+                          "lat": lat, "lng": lng,
                           "st": kw.get("status", "reported"), "rs": kw.get("risk_score")}).fetchone()
 
 
@@ -145,7 +145,7 @@ def test_role_rules_on_transitions(users):
 
 
 def test_geospatial_duplicate_detection(users):
-    lat, lng = 20.5 + random.random() * 6, 88.5 + random.random() * 4
+    lat, lng = random_dhaka_point()
     a = new_incident(users["citizen"], lat=lat, lng=lng)
     b = new_incident(users["citizen2"], lat=lat + 0.0001, lng=lng + 0.0001)      # ~15 m away
     assert a["status"] == "reported"
@@ -234,6 +234,7 @@ def test_full_dispatch_then_field_completion_returns_equipment(users, pump):
 
     # field worker completes every task -> incident resolved, pumps back in stock
     for t in tasks:
+        ensure_staff_session(t["assigned_to"])
         with as_user(t["assigned_to"]) as c:
             v = t["version"]
             for st in ("in_progress", "completed"):

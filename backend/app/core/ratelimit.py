@@ -36,7 +36,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self.limiter = limiter
 
     async def dispatch(self, request: Request, call_next):
-        if request.url.path in ("/health", "/", "/docs", "/openapi.json") or request.method == "OPTIONS":
+        # only the API is limited; website files (JS/CSS chunks) must not use up a visitor's quota
+        if not request.url.path.startswith("/api") or request.method == "OPTIONS":
             return await call_next(request)
         auth = request.headers.get("authorization", "")
         ident = hashlib.sha256(auth.encode()).hexdigest()[:16] if auth else (request.client.host if request.client else "anon")

@@ -22,13 +22,14 @@ const FieldPortalPage = lazy(() => import('./pages/FieldPortalPage'))
 const WorkflowsPage = lazy(() => import('./pages/WorkflowsPage'))
 const AnalyticsPage = lazy(() => import('./pages/AnalyticsPage'))
 const AdminPage = lazy(() => import('./pages/AdminPage'))
+const AccountPage = lazy(() => import('./pages/AccountPage'))
 
 // warm every page chunk in the background once the shell is idle so navigation is instant
 const PRELOAD = [
   () => import('./pages/RiskMapPage'), () => import('./pages/IncidentsPage'), () => import('./pages/IncidentDetailPage'),
   () => import('./pages/ReportIncidentPage'), () => import('./pages/RiskAnalysisPage'), () => import('./pages/ResourcesPage'),
   () => import('./pages/NgoCenterPage'), () => import('./pages/FieldPortalPage'), () => import('./pages/WorkflowsPage'),
-  () => import('./pages/AnalyticsPage'), () => import('./pages/AdminPage'),
+  () => import('./pages/AnalyticsPage'), () => import('./pages/AdminPage'), () => import('./pages/AccountPage'),
 ]
 
 const COORD = ['city_officer', 'ngo_coordinator', 'admin']
@@ -62,6 +63,7 @@ export default function App() {
           <Route path="/workflows" element={guard(<WorkflowsPage />, COORD)} />
           <Route path="/analytics" element={guard(<AnalyticsPage />, COORD)} />
           <Route path="/admin" element={guard(<AdminPage />, ['admin'])} />
+          <Route path="/account" element={<AccountPage />} />
         </Route>
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>

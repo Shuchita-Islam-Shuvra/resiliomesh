@@ -43,6 +43,10 @@ class Settings(BaseSettings):
     historical_csv: str = str(ROOT_DIR / "data" / "historical_rainfall_events.csv")
     climatology_csv: str = str(ROOT_DIR / "data" / "dhaka_monthly_climatology.csv")
 
+    # Built React app (frontend/dist). When set, the API also serves the website,
+    # so frontend + backend deploy as one service on one URL. Empty = API only.
+    frontend_dist: str = ""
+
     @property
     def cors_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]

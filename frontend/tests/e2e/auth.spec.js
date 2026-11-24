@@ -83,3 +83,18 @@ test('staff sign-in asks for the role-specific ID', async ({ page }) => {
   await page.getByRole('button', { name: 'Sign in', exact: true }).click()
   await expect(page.getByText('Choose your NGO')).toBeVisible()
 })
+
+test('city officer sign-up refuses a non-official e-mail domain', async ({ page }) => {
+  await page.goto('/register?role=city_officer')
+  await page.getByLabel('City authority').selectOption({ index: 1 })
+  await page.getByLabel('Official work email').fill('someone@gmail.com')
+  await page.getByRole('button', { name: 'Submit access request' }).click()
+  await expect(page.getByText(/Use your official @d[ns]cc\.gov\.bd e-mail address/)).toBeVisible()
+})
+
+test('registration accepts Bangladeshi mobile numbers only', async ({ page }) => {
+  await page.goto('/register')
+  await page.getByLabel('Mobile (Bangladesh)').fill('+14155550100')
+  await page.getByRole('button', { name: 'Create account' }).click()
+  await expect(page.getByText(/Bangladeshi mobile number/)).toBeVisible()
+})

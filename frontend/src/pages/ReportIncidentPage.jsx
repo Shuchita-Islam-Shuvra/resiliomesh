@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Crosshair, Send, WifiOff } from 'lucide-react'
+import { Crosshair, Phone, Send, WifiOff } from 'lucide-react'
 import MapView from '../components/MapView'
+import { PhoneVerify } from '../components/VerifyPanels'
 import { Alert, Button, Card, Field, Input, PageHeader, Select, Textarea } from '../components/ui'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
@@ -15,7 +16,7 @@ import { validateReport } from '../lib/validation'
 const INIT = { title: '', description: '', category: 'waterlogging', ward_id: '', asset_id: '', severity_reported: 3, water_depth_cm: '', people_affected: 0, lat: '', lng: '' }
 
 export default function ReportIncidentPage() {
-  const { profile } = useAuth()
+  const { profile, security } = useAuth()
   const toast = useToast()
   const online = useOnline()
   const nav = useNavigate()
@@ -90,6 +91,20 @@ export default function ReportIncidentPage() {
         nav('/dashboard')
       } else toast.error(errorMessage(err))
     } finally { setBusy(false) }
+  }
+
+  // the database refuses citizen reports without an SMS-verified Bangladeshi number when this is switched on
+  const needsPhone = profile.role === 'citizen' && security?.require_phone_verification && !security?.phone_verified
+  if (needsPhone) {
+    return (
+      <>
+        <PageHeader title="Report waterlogging / drainage problem" description="Accurate location and water depth help the AI prioritise the response." />
+        <Card title="Verify your mobile number first" icon={Phone} className="max-w-xl"
+          subtitle="Reports are accepted from SMS-verified Bangladeshi numbers only. This keeps fake and foreign reports out.">
+          <PhoneVerify initialPhone={profile.phone || ''} onDone={() => toast.success('Number verified — you can report now')} />
+        </Card>
+      </>
+    )
   }
 
   return (

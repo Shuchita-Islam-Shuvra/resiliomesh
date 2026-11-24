@@ -1,0 +1,13 @@
+# keep secrets and local build junk out of the image
+**/.env
+**/.env.*
+!**/.env.example
+**/node_modules
+**/.venv
+**/__pycache__
+**/.pytest_cache
+frontend/dist
+frontend/.vercel
+frontend/playwright-report
+frontend/test-results
+.git

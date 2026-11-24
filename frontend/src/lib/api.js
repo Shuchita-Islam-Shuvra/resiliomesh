@@ -1,6 +1,8 @@
 import { supabase } from './supabase'
 
-const BASE = (import.meta.env.VITE_API_URL || 'http://localhost:8000').replace(/\/$/, '')
+// Unset in a production build = same origin (the FastAPI service also serves this website).
+// Local dev (vite on :5173) talks to uvicorn on :8000 unless VITE_API_URL says otherwise.
+const BASE = (import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:8000' : '')).replace(/\/$/, '')
 
 export class ApiError extends Error {
   constructor(status, code, message, details) {

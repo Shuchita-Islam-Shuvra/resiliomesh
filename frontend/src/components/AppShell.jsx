@@ -3,7 +3,7 @@ import { NavLink, useLocation, useNavigate, useOutlet } from 'react-router-dom'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
   BarChart3, Boxes, BrainCircuit, ChevronsLeft, ChevronsRight, ClipboardList, CloudRain, HandHeart, LayoutDashboard, LogOut, Map,
-  Menu, ShieldCheck, Smartphone, Workflow, X, Wifi, WifiOff,
+  Menu, ShieldCheck, Smartphone, UserCog, Workflow, X, Wifi, WifiOff,
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
@@ -32,6 +32,9 @@ const SECTIONS = [
   ] },
   { title: 'Governance', items: [
     { to: '/admin', label: 'Audit & Admin', icon: ShieldCheck, roles: ['admin'] },
+  ] },
+  { title: 'Account', items: [
+    { to: '/account', label: 'Account & security', icon: UserCog },
   ] },
 ]
 

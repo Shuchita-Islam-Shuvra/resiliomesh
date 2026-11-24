@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import Callable
 
 import jwt
+import psycopg
 from fastapi import Depends, HTTPException, Request, status
 
 from .config import get_settings
@@ -59,22 +60,52 @@ def decode_token(token: str) -> dict:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, f"Invalid token: {exc}")
 
 
-def load_profile(user_id: str) -> dict:
+_effective_role_sql: bool | None = None     # None = not probed yet; False = migration 008 not applied
+
+
+def load_profile(user_id: str, session_id: str | None = None, aal: str | None = None) -> dict:
+    """Profile with the *effective* role for this JWT session.
+
+    Staff privileges are bound to a session that passed the server-side staff-ID
+    check (and TOTP where required) — see rm_effective_role() in migration 008.
+    A password-only session of a staff account is treated as a citizen here too,
+    so the API cannot be used to bypass the second sign-in step.
+    """
+    global _effective_role_sql
     now = time.time()
-    cached = _profile_cache.get(user_id)
+    key = f"{user_id}|{session_id}|{aal}"
+    cached = _profile_cache.get(key)
     if cached and now - cached[0] < PROFILE_TTL_S:
         return cached[1]
     with db.tx() as conn:
-        row = db.fetch_one(
-            conn,
-            "select id, email, full_name, role::text as role, organization_id, is_active from profiles where id = %s",
-            (user_id,),
-        )
+        row = None
+        if _effective_role_sql is not False:
+            try:
+                with conn.transaction():          # savepoint: a missing function must not poison the tx
+                    row = db.fetch_one(
+                        conn,
+                        """select id, email, full_name, organization_id, is_active, role::text as account_role,
+                                  rm_effective_role(id, %s::uuid, %s)::text as role
+                             from profiles where id = %s""",
+                        (session_id, aal or "aal1", user_id),
+                    )
+                _effective_role_sql = True
+            except psycopg.errors.UndefinedFunction:   # migration 008 not applied yet
+                _effective_role_sql = False
+        if _effective_role_sql is False:
+            row = db.fetch_one(
+                conn,
+                "select id, email, full_name, role::text as role, role::text as account_role, organization_id, is_active "
+                "from profiles where id = %s",
+                (user_id,),
+            )
     if not row:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Profile not found")
-    if not row["is_active"]:
+    if not row["is_active"] or row["role"] is None:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Account is deactivated")
-    _profile_cache[user_id] = (now, row)
+    if len(_profile_cache) > 5000:
+        _profile_cache.clear()
+    _profile_cache[key] = (now, row)
     return row
 
 
@@ -86,7 +117,7 @@ def get_current_user(request: Request) -> CurrentUser:
     sub = claims.get("sub")
     if not sub:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Token has no subject")
-    profile = load_profile(sub)
+    profile = load_profile(sub, claims.get("session_id"), claims.get("aal"))
     user = CurrentUser(
         id=sub,
         email=claims.get("email"),

@@ -19,7 +19,8 @@ jobs:
       - run: pip install -r backend/requirements.txt
       - name: Apply migrations on a Supabase-like Postgres
         run: |
-          for f in scripts/test_db/supabase_stub.sql supabase/migrations/00*.sql supabase/seed.sql; do
+          # same order as docs/SUPABASE_SETUP.md: 001-005, seed, then 006+
+          for f in scripts/test_db/supabase_stub.sql supabase/migrations/00[1-5]_*.sql supabase/seed.sql supabase/migrations/00[6-9]_*.sql; do
             psql -h localhost -U postgres -v ON_ERROR_STOP=1 -q -f $f
           done
       - run: cd backend && python -m pytest -q

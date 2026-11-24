@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { ArrowLeft, BrainCircuit, CheckCircle2, Copy, Eye, RefreshCw, ShieldX, Users } from 'lucide-react'
+import { ArrowLeft, BrainCircuit, CheckCircle2, Copy, Eye, RefreshCw, ShieldAlert, ShieldX, Users } from 'lucide-react'
 import ConflictDialog from '../components/ConflictDialog'
 import MapView from '../components/MapView'
 import { Alert, Button, Card, EmptyState, Field, Modal, PageHeader, RiskBadge, Select, Spinner, StatusBadge, Textarea } from '../components/ui'
@@ -9,6 +9,7 @@ import { useToast } from '../context/ToastContext'
 import { usePresence, useRealtime } from '../hooks/useRealtime'
 import { api } from '../lib/api'
 import { errorMessage } from '../lib/errors'
+import { TRUST_FLAG_LABEL } from '../lib/identity'
 import { CATEGORY_LABEL, RESOURCE_LABEL, ROLE_LABEL, fmtDateTime, fmtNum, humanize, timeAgo } from '../lib/format'
 import { supabase } from '../lib/supabase'
 
@@ -97,6 +98,14 @@ export default function IncidentDetailPage() {
         <p className="mb-3 inline-flex items-center gap-1.5 rounded-full bg-sky-50 px-3 py-1 text-xs text-sky-800"><Eye className="h-3.5 w-3.5" aria-hidden />Also viewing: {peers.map((p) => `${p.name} (${ROLE_LABEL[p.role]})`).join(', ')}</p>
       )}
       {changedBanner && <Alert tone="info" className="mb-4">This report was just updated by another user. You are seeing the latest version (v{inc.version}).</Alert>}
+      {isStaff && inc.trust_flags?.length > 0 && inc.status === 'reported' && (
+        <Alert tone="warning" className="mb-4" title="Check this report before acting on it">
+          <span className="flex flex-wrap items-center gap-1.5"><ShieldAlert className="h-4 w-4" aria-hidden />
+            {inc.trust_flags.map((f) => <span key={f} className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-900">{TRUST_FLAG_LABEL[f] || f}</span>)}
+          </span>
+          <span className="mt-1 block text-xs">Signals recorded by the server when the report arrived (reporter's network, verified phone, distance from home area). They do not block the report — verify it on the ground or by phone first.</span>
+        </Alert>
+      )}
       {inc.status === 'duplicate' && <Alert tone="warning" className="mb-4">This report was flagged as a duplicate of <Link className="font-medium underline" to={`/incidents/${inc.duplicate_of}`}>another report</Link>.</Alert>}
 
       {officer && (

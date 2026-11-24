@@ -9,6 +9,9 @@ const FRIENDLY = {
   INFEASIBLE: 'This plan cannot be executed.',
   VALIDATION: 'Please check the input.',
   RATE_LIMITED: 'Too many requests — please wait a moment.',
+  PHONE_NOT_VERIFIED: 'Verify your mobile number under Account & security first.',
+  CONFLICT: 'Someone else already changed this — refresh and try again.',
+  UNAUTHENTICATED: 'Please sign in again.',
   NETWORK: 'Network problem — check your connection.',
   TIMEOUT: 'The server took too long to respond.',
 }

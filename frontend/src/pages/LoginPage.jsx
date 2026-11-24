@@ -17,6 +17,8 @@ const DEMO = {
   field_worker: { email: 'field1@resiliomesh.demo', employee_id: 'FW-001' },
   admin: { email: 'admin@resiliomesh.demo', employee_id: 'ADM-001' },
 }
+// second admin: staff / admin grants need two different administrators
+const DEMO_ADMIN2 = { email: 'admin2@resiliomesh.demo', employee_id: 'ADM-002' }
 const ID_PLACEHOLDER = { city_officer: 'e.g. DSCC-OFF-01', field_worker: 'e.g. FW-001', admin: 'e.g. ADM-001' }
 
 // Client-side brute-force brake (Supabase also rate-limits server-side).
@@ -101,7 +103,11 @@ export default function LoginPage() {
           action: actual && { label: `Sign in as ${actual.label}`, run: () => setRole(actual.key) },
         })
       } else if (err.code === 'ID_MISMATCH') {
-        countFail(`Incorrect email, password or ${idLabel || 'NGO'}.`)
+        // the server counts wrong IDs per account and locks it (cannot be reset from the browser)
+        if (err.attemptsLeft != null) setFormError({ tone: 'error', text: `Incorrect ${idLabel || 'NGO'} for this account. ${err.attemptsLeft} attempt${err.attemptsLeft === 1 ? '' : 's'} left before the account is locked for a while.` })
+        else countFail(`Incorrect email, password or ${idLabel || 'NGO'}.`)
+      } else if (err.code === 'LOCKED') {
+        setFormError({ tone: 'error', text: `${err.message} If this wasn't you, tell a system administrator.` })
       } else if (err.code === 'ROLE_PENDING') {
         setFormError({ tone: 'info', text: `Your ${R.label} access request is pending administrator approval. You'll be able to sign in here once it is approved — until then you can use the Citizen tab.`, action: { label: 'Sign in as Citizen', run: () => setRole('citizen') } })
       } else if (err.code === 'ROLE_REJECTED') {
@@ -218,6 +224,12 @@ export default function LoginPage() {
           onClick={() => setV((cur) => ({ ...cur, email: demo.email, employee_id: demo.employee_id || '', organization_id: demo.organization_id || '' }))}>
           Fill {demo.email}{demo.employee_id ? ` · ${demo.employee_id}` : ''}{demo.org ? ` · ${demo.org}` : ''}
         </button>
+        {role === 'admin' && (
+          <button type="button" className="mt-1 block text-left text-brand-700 hover:underline"
+            onClick={() => setV((cur) => ({ ...cur, email: DEMO_ADMIN2.email, employee_id: DEMO_ADMIN2.employee_id }))}>
+            Fill {DEMO_ADMIN2.email} · {DEMO_ADMIN2.employee_id} <span className="text-xs text-slate-500">(second approver)</span>
+          </button>
+        )}
       </details>
     </PortalLayout>
   )
