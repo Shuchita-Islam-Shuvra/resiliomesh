@@ -73,8 +73,15 @@ def nearest_ward(c, lat: float, lng: float) -> str:
                      (lng, lat)).fetchone()["id"]
 
 
-def random_dhaka_point() -> tuple[float, float]:
-    return random.uniform(DHAKA[0], DHAKA[1]), random.uniform(DHAKA[2], DHAKA[3])
+def random_dhaka_point(area: str | None = None) -> tuple[float, float]:
+    """Random point in the service area; with `area` ('DNCC' / 'DSCC') one whose nearest ward is in that area."""
+    while True:
+        lat, lng = random.uniform(DHAKA[0], DHAKA[1]), random.uniform(DHAKA[2], DHAKA[3])
+        if area is None:
+            return lat, lng
+        with raw() as c:
+            if nearest_ward(c, lat, lng).startswith(area):
+                return lat, lng
 
 
 @contextmanager

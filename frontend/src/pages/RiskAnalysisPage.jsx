@@ -6,6 +6,7 @@ import { Alert, AnimatedNumber, Button, Card, PageHeader, RiskBadge, Skeleton } 
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
 import { api } from '../lib/api'
+import { areaLabel } from '../lib/areas'
 import { errorMessage } from '../lib/errors'
 import { RISK_COLOR } from '../lib/format'
 
@@ -41,7 +42,9 @@ function Gauge({ score, level }) {
 }
 
 export default function RiskAnalysisPage() {
-  const { hasRole } = useAuth()
+  const { hasRole, area } = useAuth()
+  // Drainage Officers re-score only their own area (Dhaka North / South)
+  const rescoreLabel = `Re-score ${area ? `${areaLabel(area)} wards` : 'all wards'} with live weather`
   const toast = useToast()
   const [model, setModel] = useState(null)
   const [modelErr, setModelErr] = useState('')
@@ -77,7 +80,7 @@ export default function RiskAnalysisPage() {
     <>
       <PageHeader eyebrow="Intelligence" title="AI risk analysis"
         description="Gradient-boosted XGBoost model combined with a deterministic safety rule engine. Every score is explained feature by feature (SHAP)."
-        actions={hasRole('city_officer', 'admin') && <Button loading={refreshing} onClick={refresh}><RefreshCw className="h-4 w-4" />Re-score all wards with live weather</Button>} />
+        actions={hasRole('city_officer', 'admin') && <Button loading={refreshing} onClick={refresh}><RefreshCw className="h-4 w-4" />{rescoreLabel}</Button>} />
       {modelErr && <Alert tone="error" className="mb-4">Backend unavailable: {modelErr}</Alert>}
 
       <div className="grid gap-5">
@@ -190,7 +193,7 @@ export default function RiskAnalysisPage() {
             )}
           </Card>
           <Card index={3} icon={CloudRain} title="Latest ward re-score" subtitle={refreshOut ? `${refreshOut.updated} wards · ${refreshOut.degraded_weather} on fallback weather` : 'Run a re-score to see live results'} className="lg:col-span-2" bodyClass="p-0">
-            {!refreshOut ? <p className="p-5 text-sm text-slate-500">Click “Re-score all wards with live weather”. Each ward pulls its own rainfall forecast, then the model and rules recompute its risk.</p> : (
+            {!refreshOut ? <p className="p-5 text-sm text-slate-500">Click “{rescoreLabel}”. Each ward pulls its own rainfall forecast, then the model and rules recompute its risk.</p> : (
               <ul className="grid max-h-80 overflow-y-auto sm:grid-cols-2">
                 {refreshOut.wards.slice().sort((a, b) => b.score - a.score).map((w, i) => (
                   <motion.li key={w.ward_id} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.02 }}

@@ -63,7 +63,7 @@ def ensure_staff_session(uid):
 
 
 def new_incident(uid, **kw):
-    lat, lng = random_dhaka_point()                    # spread out: avoid geo-duplicate
+    lat, lng = random_dhaka_point("DSCC")              # spread out: avoid geo-duplicate; in the officer's area
     lat, lng = kw.get("lat", lat), kw.get("lng", lng)
     with raw() as c:
         ward = nearest_ward(c, lat, lng)               # the pin must belong to the chosen ward

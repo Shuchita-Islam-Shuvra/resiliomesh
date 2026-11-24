@@ -19,7 +19,7 @@ export const domainMatches = (domain, allowed = []) =>
 /**
  * Why this e-mail cannot be used for the requested staff role (null = fine).
  * @param org       the chosen organisation ({ email_domains }) or null / 'other'
- * @param allOrgs   every public organisation (city officers without a choice)
+ * @param allOrgs   every public organisation (drainage officers without a choice)
  */
 export function emailPolicyError(email, role, org, allOrgs = []) {
   const d = emailDomain(email)

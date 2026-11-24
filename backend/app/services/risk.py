@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 from ..core import db
+from ..core.areas import assert_wards_in_area, officer_area
 from ..core.auth import CurrentUser
 from ..core.config import get_settings
 from ..core.errors import AppError
@@ -54,6 +55,8 @@ def assess_incident(incident_id: str, user: CurrentUser) -> dict:
     # 1) read context (no lock held during the external API call)
     with db.tx() as conn:
         ctx = db.fetch_one(conn, _CONTEXT_SQL, (incident_id,))
+        if ctx:
+            assert_wards_in_area(conn, user, [ctx["ward_id"]])
     if not ctx:
         raise AppError(404, "NOT_FOUND", "Incident not found")
     if ctx["status"] not in ("verified", "assessed"):
@@ -101,13 +104,15 @@ def assess_incident(incident_id: str, user: CurrentUser) -> dict:
 
 
 def refresh_wards(user: CurrentUser) -> dict:
+    """Re-score wards with live weather. Officers re-score only their own area."""
     with db.tx() as conn:
+        area = officer_area(conn, user)
         wards = db.fetch_all(conn, """
           select w.*, (select round(avg(condition_score)) from drainage_assets a where a.ward_id = w.id) as asset_condition,
                  (select count(*) from drainage_assets a where a.ward_id = w.id and a.status = 'blocked') as blocked_assets,
                  (select count(*) from incidents i where i.ward_id = w.id and i.created_at > now() - interval '6 hours'
                     and i.status <> 'rejected') as recent_reports_6h
-          from wards w order by id""")
+          from wards w where %(area)s::text is null or w.city_corporation = %(area)s order by id""", {"area": area})
     client = get_weather_client()
     with ThreadPoolExecutor(max_workers=5) as pool:
         weathers = list(pool.map(lambda w: client.get(w["id"], w["lat"], w["lng"]), wards))
@@ -128,4 +133,4 @@ def refresh_wards(user: CurrentUser) -> dict:
             out.append({"ward_id": w["id"], "name": w["name"], "score": r["score"], "level": r["level"],
                         "weather_source": wx["source"], "rain_next_24h_mm": wx["rain_next_24h_mm"]})
     degraded = sum(1 for wx in weathers if wx.get("degraded"))
-    return {"updated": len(out), "degraded_weather": degraded, "wards": out}
+    return {"updated": len(out), "degraded_weather": degraded, "area": area, "wards": out}

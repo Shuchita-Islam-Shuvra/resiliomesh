@@ -8,6 +8,7 @@ import {
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
 import { useDebouncedCallback, useRealtime } from '../hooks/useRealtime'
+import { AREA_LABEL } from '../lib/areas'
 import { errorMessage } from '../lib/errors'
 import { CATEGORY_LABEL, fmtNum, humanize, timeAgo } from '../lib/format'
 import { supabase } from '../lib/supabase'
@@ -31,25 +32,28 @@ export default function IncidentsPage() {
 }
 
 function IncidentsTab() {
+  const { area } = useAuth()
   const [rows, setRows] = useState(null)
   const [total, setTotal] = useState(0)
   const [wards, setWards] = useState([])
-  const [f, setF] = useState({ q: '', status: '', category: '', risk: '', ward: '' })
+  // Drainage Officers start on their own area (Dhaka North / South) and can widen to all of Dhaka
+  const [f, setF] = useState({ q: '', status: '', category: '', risk: '', ward: '', area: area || '' })
   const [sort, setSort] = useState({ field: 'created_at', dir: 'desc' })
   const [page, setPage] = useState(1)
   const [err, setErr] = useState('')
 
-  useEffect(() => { supabase.from('wards').select('id,name').order('name').then(({ data }) => setWards(data || [])) }, [])
+  useEffect(() => { supabase.from('wards').select('id,name,city_corporation').order('name').then(({ data }) => setWards(data || [])) }, [])
 
   const load = useCallback(async () => {
     let q = supabase.from('incidents')
-      .select('id,reference_code,title,category,status,ward_id,risk_level,risk_score,priority,people_affected,water_depth_cm,created_at,wards(name)', { count: 'exact' })
+      .select('id,reference_code,title,category,status,ward_id,risk_level,risk_score,priority,people_affected,water_depth_cm,created_at,wards!inner(name,city_corporation)', { count: 'exact' })
     const term = f.q.trim().replace(/[%,()]/g, '')
     if (term) q = q.or(`title.ilike.%${term}%,reference_code.ilike.%${term}%,description.ilike.%${term}%`)
     if (f.status) q = q.eq('status', f.status)
     if (f.category) q = q.eq('category', f.category)
     if (f.risk) q = q.eq('risk_level', f.risk)
     if (f.ward) q = q.eq('ward_id', f.ward)
+    if (f.area) q = q.eq('wards.city_corporation', f.area)
     q = q.order(sort.field, { ascending: sort.dir === 'asc', nullsFirst: false }).range((page - 1) * PAGE, page * PAGE - 1)
     const { data, count, error } = await q
     if (error) { setErr(errorMessage(error)); setRows([]); return }
@@ -61,11 +65,11 @@ function IncidentsTab() {
   useRealtime('incidents', useDebouncedCallback(load, 800))
 
   const onSort = (field) => setSort((s) => ({ field, dir: s.field === field && s.dir === 'desc' ? 'asc' : 'desc' }))
-  const set = (k) => (e) => { setPage(1); setF({ ...f, [k]: e.target.value }) }
+  const set = (k) => (e) => { setPage(1); setF({ ...f, [k]: e.target.value, ...(k === 'area' && { ward: '' }) }) }
 
   return (
     <Card bodyClass="p-0">
-      <div className="grid gap-2 border-b border-slate-100 p-4 sm:grid-cols-2 lg:grid-cols-6">
+      <div className="grid gap-2 border-b border-slate-100 p-4 sm:grid-cols-2 lg:grid-cols-7">
         <div className="relative lg:col-span-2">
           <label htmlFor="inc-search" className="sr-only">Search reports</label>
           <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" aria-hidden />
@@ -74,7 +78,8 @@ function IncidentsTab() {
         <Select aria-label="Filter by status" value={f.status} onChange={set('status')}><option value="">All statuses</option>{STATUSES.map((s) => <option key={s} value={s}>{humanize(s)}</option>)}</Select>
         <Select aria-label="Filter by category" value={f.category} onChange={set('category')}><option value="">All categories</option>{Object.entries(CATEGORY_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</Select>
         <Select aria-label="Filter by risk" value={f.risk} onChange={set('risk')}><option value="">Any risk</option>{['critical', 'high', 'moderate', 'low'].map((r) => <option key={r} value={r}>{humanize(r)}</option>)}</Select>
-        <Select aria-label="Filter by ward" value={f.ward} onChange={set('ward')}><option value="">All wards</option>{wards.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</Select>
+        <Select aria-label="Filter by area" value={f.area} onChange={set('area')}><option value="">All of Dhaka</option>{Object.entries(AREA_LABEL).map(([k, v]) => <option key={k} value={k}>{v}{k === area ? ' (my area)' : ''}</option>)}</Select>
+        <Select aria-label="Filter by ward" value={f.ward} onChange={set('ward')}><option value="">All wards</option>{wards.filter((w) => !f.area || w.city_corporation === f.area).map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</Select>
       </div>
       {err && <Alert tone="error" className="m-4">{err}</Alert>}
       {!rows ? <Spinner /> : rows.length === 0 ? <EmptyState icon={Droplets} title="No reports match these filters" /> : (
@@ -113,7 +118,7 @@ function IncidentsTab() {
 const EMPTY_ASSET = { code: '', name: '', asset_type: 'drain', ward_id: '', lat: '', lng: '', capacity_m3s: '', condition_score: 70, status: 'operational' }
 
 function AssetsTab() {
-  const { hasRole, profile } = useAuth()
+  const { hasRole, profile, canManageArea } = useAuth()
   const toast = useToast()
   const [rows, setRows] = useState(null)
   const [wards, setWards] = useState([])
@@ -125,16 +130,18 @@ function AssetsTab() {
   const [conflict, setConflict] = useState(null)
   const [busy, setBusy] = useState(false)
   const canEdit = hasRole('city_officer', 'admin')
+  // officers edit their own authority's assets in their own area; admins everything
+  const canEditAsset = (a) => hasRole('admin') || (canManageArea(a.wards?.city_corporation) && a.owner_org_id === profile?.organization_id)
 
   const load = useCallback(async () => {
-    let query = supabase.from('drainage_assets').select('*, wards(name)')
+    let query = supabase.from('drainage_assets').select('*, wards(name, city_corporation)')
     if (q.trim()) query = query.or(`name.ilike.%${q.trim().replace(/[%,()]/g, '')}%,code.ilike.%${q.trim().replace(/[%,()]/g, '')}%`)
     if (status) query = query.eq('status', status)
     const { data } = await query.order(sort.field, { ascending: sort.dir === 'asc' })
     setRows(data || [])
   }, [q, status, sort])
   useEffect(() => { load() }, [load])
-  useEffect(() => { supabase.from('wards').select('id,name').order('name').then(({ data }) => setWards(data || [])) }, [])
+  useEffect(() => { supabase.from('wards').select('id,name,city_corporation').order('name').then(({ data }) => setWards(data || [])) }, [])
   useRealtime('drainage_assets', useDebouncedCallback(load, 600))
 
   const save = async () => {
@@ -211,7 +218,7 @@ function AssetsTab() {
                   </td>
                   <td className="hidden px-3 py-2.5 text-xs text-slate-500 md:table-cell">{timeAgo(a.last_maintained_at)}</td>
                   {canEdit && <td className="px-3 py-2.5 text-right whitespace-nowrap">
-                    <Button size="sm" variant="ghost" aria-label={`Edit ${a.code}`} onClick={() => { setErrors({}); setEdit({ ...a, _original: a }) }}><Pencil className="h-4 w-4" /></Button>
+                    {canEditAsset(a) && <Button size="sm" variant="ghost" aria-label={`Edit ${a.code}`} onClick={() => { setErrors({}); setEdit({ ...a, _original: a }) }}><Pencil className="h-4 w-4" /></Button>}
                     {hasRole('admin') && <Button size="sm" variant="ghost" aria-label={`Delete ${a.code}`} onClick={() => remove(a)}><Trash2 className="h-4 w-4 text-rose-600" /></Button>}
                   </td>}
                 </tr>
@@ -227,7 +234,7 @@ function AssetsTab() {
             <Field label="Code" error={errors.code} required>{(a) => <Input {...a} value={edit.code} onChange={s('code')} disabled={Boolean(edit.id)} />}</Field>
             <Field label="Type">{(a) => <Select {...a} value={edit.asset_type} onChange={s('asset_type')}>{['canal', 'drain', 'culvert', 'pump_station', 'retention_pond', 'sluice_gate'].map((t) => <option key={t} value={t}>{humanize(t)}</option>)}</Select>}</Field>
             <Field label="Name" error={errors.name} required className="sm:col-span-2">{(a) => <Input {...a} value={edit.name} onChange={s('name')} />}</Field>
-            <Field label="Ward" error={errors.ward_id} required>{(a) => <Select {...a} value={edit.ward_id} onChange={s('ward_id')}><option value="">Select</option>{wards.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</Select>}</Field>
+            <Field label="Ward" error={errors.ward_id} required>{(a) => <Select {...a} value={edit.ward_id} onChange={s('ward_id')}><option value="">Select</option>{wards.filter((w) => canManageArea(w.city_corporation)).map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</Select>}</Field>
             <Field label="Status">{(a) => <Select {...a} value={edit.status} onChange={s('status')}>{['operational', 'degraded', 'blocked', 'under_maintenance'].map((t) => <option key={t} value={t}>{humanize(t)}</option>)}</Select>}</Field>
             <Field label="Latitude" error={errors.lat} required>{(a) => <Input {...a} inputMode="decimal" value={edit.lat} onChange={s('lat')} />}</Field>
             <Field label="Longitude" error={errors.lng} required>{(a) => <Input {...a} inputMode="decimal" value={edit.lng} onChange={s('lng')} />}</Field>

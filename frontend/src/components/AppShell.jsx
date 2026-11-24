@@ -10,6 +10,7 @@ import { useToast } from '../context/ToastContext'
 import { useOnline } from '../hooks/useOnline'
 import { flushOutbox } from '../offline/sync'
 import { supabase } from '../lib/supabase'
+import { areaLabel } from '../lib/areas'
 import { ROLE_LABEL } from '../lib/format'
 import { Spinner } from './ui'
 
@@ -53,7 +54,7 @@ function Clock() {
 }
 
 export default function AppShell() {
-  const { profile, org, signOut } = useAuth()
+  const { profile, org, area, signOut } = useAuth()
   const online = useOnline()
   const toast = useToast()
   const [open, setOpen] = useState(false)
@@ -157,7 +158,7 @@ export default function AppShell() {
               <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-brand-500 to-brand-700 text-sm font-bold text-white">{initials}</div>
               <div className="min-w-0">
                 <p className="truncate text-sm font-semibold text-slate-900">{profile?.full_name}</p>
-                <span className={`mt-0.5 inline-block rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ring-inset ${ROLE_TONE[profile?.role]}`}>{ROLE_LABEL[profile?.role]}</span>
+                <span className={`mt-0.5 inline-block rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ring-inset ${ROLE_TONE[profile?.role]}`}>{ROLE_LABEL[profile?.role]}{profile?.role === 'city_officer' && ` · ${areaLabel(area)}`}</span>
               </div>
             </div>
             {org && <p className="mt-2 truncate text-xs text-slate-500">{org.name}</p>}

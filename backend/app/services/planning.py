@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import asdict
 
 from ..core import db
+from ..core.areas import assert_wards_in_area
 from ..core.auth import CurrentUser
 from ..core.errors import AppError
 from .optimizer import Constraints, IncidentDemand, ResourcePool, derive_demand, optimize
@@ -21,8 +22,9 @@ def create_plan(incident_ids: list[str], constraints: Constraints, user: Current
     with db.tx() as conn:
         incs = db.fetch_all(conn, """
             select id::text, reference_code, title, category::text, status::text, water_depth_cm, people_affected,
-                   risk_score, risk_level::text, priority, lat, lng
+                   risk_score, risk_level::text, priority, lat, lng, ward_id
             from incidents where id = any(%s::uuid[])""", (incident_ids,))
+        assert_wards_in_area(conn, user, [i["ward_id"] for i in incs])
         pools = db.fetch_all(conn, """
             select id::text, resource_type::text, quantity_available, lat, lng, organization_id::text, name
             from resources where quantity_available > 0""")

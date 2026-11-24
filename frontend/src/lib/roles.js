@@ -9,10 +9,11 @@ export const ROLES = [
     points: ['Report waterlogging with photo, depth and GPS', 'Track every report from verification to resolution', 'Live risk level for your home area'],
   },
   {
-    key: 'city_officer', short: 'Officer', label: 'City Officer', icon: Landmark, selfRegister: 'request',
-    tagline: 'Verify reports, run AI risk scoring and dispatch pumps and crews.',
-    signInSubtitle: 'City corporation drainage & operations staff.',
-    points: ['Verify and triage incoming reports', 'Ward-level XGBoost risk scoring', 'Optimised pump & crew dispatch'],
+    // key stays `city_officer` (database role); shown as Drainage Officer of Dhaka North or Dhaka South
+    key: 'city_officer', short: 'Officer', label: 'Drainage Officer', icon: Landmark, selfRegister: 'request',
+    tagline: 'Verify reports, run AI risk scoring and dispatch pumps and crews in your area: Dhaka North or Dhaka South.',
+    signInSubtitle: 'Drainage staff of Dhaka North (DNCC) or Dhaka South (DSCC) City Corporation.',
+    points: ['Verify and triage reports in your area', 'Ward-level XGBoost risk scoring', 'Optimised pump & crew dispatch'],
   },
   {
     key: 'ngo_coordinator', short: 'NGO', label: 'NGO Coordinator', icon: HeartHandshake, selfRegister: 'request',

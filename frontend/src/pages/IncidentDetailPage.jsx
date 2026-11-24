@@ -8,6 +8,7 @@ import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
 import { usePresence, useRealtime } from '../hooks/useRealtime'
 import { api } from '../lib/api'
+import { areaLabel } from '../lib/areas'
 import { errorMessage } from '../lib/errors'
 import { TRUST_FLAG_LABEL } from '../lib/identity'
 import { CATEGORY_LABEL, RESOURCE_LABEL, ROLE_LABEL, fmtDateTime, fmtNum, humanize, timeAgo } from '../lib/format'
@@ -15,7 +16,7 @@ import { supabase } from '../lib/supabase'
 
 export default function IncidentDetailPage() {
   const { id } = useParams()
-  const { profile, hasRole, isStaff } = useAuth()
+  const { profile, hasRole, isStaff, area, canManageArea } = useAuth()
   const toast = useToast()
   const [inc, setInc] = useState(null)
   const [history, setHistory] = useState([])
@@ -30,11 +31,14 @@ export default function IncidentDetailPage() {
   const [dupOf, setDupOf] = useState('')
   const [nearby, setNearby] = useState([])
   const peers = usePresence(`incident:${id}`, profile)
-  const officer = hasRole('city_officer', 'admin')
+  const wardArea = inc?.wards?.city_corporation
+  // Drainage Officers act only in their own area (Dhaka North / South); admins everywhere
+  const officer = hasRole('city_officer', 'admin') && canManageArea(wardArea)
+  const outsideArea = hasRole('city_officer') && inc && !officer
 
   const load = useCallback(async () => {
     const { data, error } = await supabase.from('incidents')
-      .select('*, wards(name), drainage_assets(name,code,status,condition_score), reporter:profiles!incidents_reporter_id_fkey(full_name)')
+      .select('*, wards(name, city_corporation), drainage_assets(name,code,status,condition_score), reporter:profiles!incidents_reporter_id_fkey(full_name)')
       .eq('id', id).maybeSingle()
     if (error || !data) { setNotFound(true); return }
     setInc(data)
@@ -108,6 +112,13 @@ export default function IncidentDetailPage() {
       )}
       {inc.status === 'duplicate' && <Alert tone="warning" className="mb-4">This report was flagged as a duplicate of <Link className="font-medium underline" to={`/incidents/${inc.duplicate_of}`}>another report</Link>.</Alert>}
 
+      {outsideArea && (
+        <Alert tone="info" className="mb-4" title={`Outside your area: this report is in ${areaLabel(wardArea)}`}>
+          {area
+            ? `You can follow it, but only ${areaLabel(wardArea)} officers can verify, assess or resolve it. Your area is ${areaLabel(area)}.`
+            : 'Your authority has no area (Dhaka North / Dhaka South) set yet. Ask an admin.'}
+        </Alert>
+      )}
       {officer && (
         <Card className="mb-5" title="Actions" subtitle={`Version ${inc.version} — actions use optimistic locking`}>
           <div className="flex flex-wrap gap-2">

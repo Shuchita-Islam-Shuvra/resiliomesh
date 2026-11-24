@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { canManageArea as canManageAreaFor } from '../lib/areas'
 import { normalizeBdPhone } from '../lib/identity'
 import { supabase } from '../lib/supabase'
 
@@ -31,7 +32,8 @@ export function AuthProvider({ children }) {
     const my = ++seq.current
     if (!s?.user) { setProfile(null); setOrg(null); setSecurity(null); return }
     const [{ data, error }, st] = await Promise.all([
-      supabase.from('profiles').select('*, organizations(name, type)').eq('id', s.user.id).maybeSingle(),
+      // organizations(*) rather than a column list: still works before migration 009 adds city_corporation
+      supabase.from('profiles').select('*, organizations(*)').eq('id', s.user.id).maybeSingle(),
       supabase.rpc('rm_session_status'),
     ])
     if (my !== seq.current) return                      // a newer load (e.g. after MFA) already won
@@ -151,6 +153,9 @@ export function AuthProvider({ children }) {
       role: profile?.role,
       hasRole: (...roles) => Boolean(profile && roles.includes(profile.role)),
       isStaff: Boolean(profile && profile.role !== 'citizen'),
+      // Drainage Officer area (Dhaka North / South) from their authority; admins are city-wide
+      area: profile?.role === 'city_officer' ? (org?.city_corporation || null) : null,
+      canManageArea: (wardArea) => canManageAreaFor(profile?.role, org?.city_corporation, wardArea),
       refreshProfile: refresh,
       signOut,
       signIn: async (email, password) => {
