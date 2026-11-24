@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, Navigate, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
-import { Lock, LogIn, MailCheck, UserPlus } from 'lucide-react'
+import { ArrowDown, Lock, LogIn, MailCheck, UserPlus } from 'lucide-react'
 import { Alert, Button, Field, Input, Select } from '../components/ui'
 import { PasswordInput } from '../components/PasswordInput'
+import DemoProfiles from '../components/DemoProfiles'
 import PortalLayout from '../components/PortalLayout'
 import { useAuth } from '../context/AuthContext'
+import { api } from '../lib/api'
 import { ROLE_BY_KEY, roleOrDefault } from '../lib/roles'
 import { supabase } from '../lib/supabase'
 import { SIGNIN_ID_LABEL, validateEmail, validateSignIn } from '../lib/validation'
@@ -46,6 +48,9 @@ export default function LoginPage() {
   const [formError, setFormError] = useState(null)    // { text, tone, action? }
   const [busy, setBusy] = useState(false)
   const [lockLeft, setLockLeft] = useState(0)
+  // judge demo picker: null = still asking the server (picker shown meanwhile), false = demo mode off
+  const [demoOn, setDemoOn] = useState(null)
+  const [codeRequired, setCodeRequired] = useState(false)   // server decides (DEMO_ACCESS_CODE set or not)
 
   useEffect(() => {
     const tick = () => setLockLeft(Math.max(0, Math.ceil((readLock().until - Date.now()) / 1000)))
@@ -54,6 +59,12 @@ export default function LoginPage() {
     return () => clearInterval(t)
   }, [])
   useEffect(() => { supabase.rpc('rm_public_organizations').then(({ data }) => setOrgs(data || [])) }, [])
+  // also wakes a sleeping free-tier server while the judge reads the page
+  useEffect(() => {
+    let live = true
+    api('/api/demo', { timeoutMs: 90000 }).then((r) => { if (live) { setDemoOn(Boolean(r.enabled)); setCodeRequired(Boolean(r.code_required)) } }).catch((e) => { if (live && e.code === 'NO_API') setDemoOn(false) /* else unknown (server waking up): keep the buttons */ })
+    return () => { live = false }
+  }, [])
   const ngos = useMemo(() => orgs.filter((o) => o.type === 'ngo'), [orgs])
 
   // while signInAs verifies the role the session briefly exists — don't redirect mid-check
@@ -165,6 +176,12 @@ export default function LoginPage() {
   const demo = DEMO[role]
   return (
     <PortalLayout {...layout} onRoleChange={setRole} title={`Sign in as ${R.label}`} subtitle={R.signInSubtitle}>
+      {demoOn !== false && (
+        <button type="button" onClick={() => document.getElementById('demo-accounts-title')?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
+          className="mb-4 flex w-full items-center justify-center gap-1.5 rounded-lg bg-brand-50 px-3 py-2 text-sm font-semibold text-brand-800 ring-1 ring-inset ring-brand-200 hover:bg-brand-100">
+          Judges: one-click {R.label} demo login below, no password needed<ArrowDown className="h-4 w-4" aria-hidden />
+        </button>
+      )}
       <form onSubmit={submit} noValidate className="space-y-5" aria-label={`${R.label} sign in`}>
         {formError && (
           <Alert tone={formError.tone}>
@@ -217,7 +234,12 @@ export default function LoginPage() {
         <p className="mt-5 text-center text-xs text-slate-500">Admin accounts are created by an existing administrator only.</p>
       )}
 
-      <details className="mt-5 rounded-xl border border-slate-200 bg-slate-50/60 p-3 text-sm">
+      {demoOn !== false ? (
+        <div className="mt-6">
+          <DemoProfiles role={role} busy={busy} setBusy={setBusy} codeRequired={codeRequired}
+            onSignedIn={() => nav(loc.state?.from || '/dashboard', { replace: true })} />
+        </div>
+      ) :       (<details className="mt-5 rounded-xl border border-slate-200 bg-slate-50/60 p-3 text-sm">
         <summary className="cursor-pointer font-medium text-slate-700">Demo account (judges)</summary>
         <p className="mt-2 text-xs text-slate-500">Password for all demo accounts is shared privately with the judging panel.</p>
         <button type="button" className="mt-2 text-left text-brand-700 hover:underline"
@@ -230,7 +252,7 @@ export default function LoginPage() {
             Fill {DEMO_ADMIN2.email} · {DEMO_ADMIN2.employee_id} <span className="text-xs text-slate-500">(second approver)</span>
           </button>
         )}
-      </details>
+      </details>)}
     </PortalLayout>
   )
 }

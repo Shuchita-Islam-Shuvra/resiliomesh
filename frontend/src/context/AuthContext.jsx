@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { api } from '../lib/api'
 import { canManageArea as canManageAreaFor } from '../lib/areas'
 import { normalizeBdPhone } from '../lib/identity'
 import { supabase } from '../lib/supabase'
@@ -148,6 +149,26 @@ export function AuthProvider({ children }) {
       }
     }
 
+    /** After the password step: role check / server-side staff-ID check, then load the profile. */
+    async function finishRoleSignIn(data, expectedRole, extra = {}) {
+      const uid = data.user.id
+      let r
+      if (expectedRole === 'citizen') {
+        const { data: p, error: pErr } = await supabase.from('profiles').select('role, is_active').eq('id', uid).maybeSingle()
+        if (pErr || !p) return fail('NO_PROFILE', 'Your profile could not be loaded. Please try again.')
+        if (!p.is_active) return fail('INACTIVE', 'This account has been deactivated. Contact a system administrator.')
+        r = p.role === 'citizen' ? { ok: true } : { code: 'ROLE_MISMATCH', actual_role: p.role }
+      } else {
+        try { r = await verifyStaff(expectedRole, extra) } catch (e) {
+          if (!isMissingFn(e)) { await signOut(); throw e }
+          r = await legacyCheck(uid, expectedRole, extra)
+        }
+      }
+      if (!r?.ok) return explainFailure(r || {}, uid, expectedRole)
+      await loadProfile(data.session)
+      return { ...data, mfa: Boolean(r.mfa_required && r.aal !== 'aal2') }
+    }
+
     return {
       session, profile, org, loading, security,
       role: profile?.role,
@@ -175,22 +196,18 @@ export function AuthProvider({ children }) {
       signInAs: async (email, password, expectedRole, extra = {}) => {
         const { data, error } = await supabase.auth.signInWithPassword({ email, password })
         if (error) throw error
-        const uid = data.user.id
-        let r
-        if (expectedRole === 'citizen') {
-          const { data: p, error: pErr } = await supabase.from('profiles').select('role, is_active').eq('id', uid).maybeSingle()
-          if (pErr || !p) return fail('NO_PROFILE', 'Your profile could not be loaded. Please try again.')
-          if (!p.is_active) return fail('INACTIVE', 'This account has been deactivated. Contact a system administrator.')
-          r = p.role === 'citizen' ? { ok: true } : { code: 'ROLE_MISMATCH', actual_role: p.role }
-        } else {
-          try { r = await verifyStaff(expectedRole, extra) } catch (e) {
-            if (!isMissingFn(e)) { await signOut(); throw e }
-            r = await legacyCheck(uid, expectedRole, extra)
-          }
-        }
-        if (!r?.ok) return explainFailure(r || {}, uid, expectedRole)
-        await loadProfile(data.session)
-        return { ...data, mfa: Boolean(r.mfa_required && r.aal !== 'aal2') }
+        return finishRoleSignIn(data, expectedRole, extra)
+      },
+      /**
+       * Judge demo: one click per demo profile. The server checks the privately shared
+       * access code and signs in with the demo password (which never reaches the browser);
+       * the session then goes through the same server-side staff-ID step as a normal sign-in.
+       */
+      signInDemo: async (profileKey, code) => {
+        const r = await api('/api/demo/session', { method: 'POST', body: { profile: profileKey, code }, timeoutMs: 90000 })
+        const { data, error } = await supabase.auth.setSession({ access_token: r.access_token, refresh_token: r.refresh_token })
+        if (error) throw error
+        return finishRoleSignIn(data, r.role, r.extra || {})
       },
       /** Re-verify the staff ID for the current session (expired shift, page opened later…). */
       verifyStaffSession: async (extra = {}) => {

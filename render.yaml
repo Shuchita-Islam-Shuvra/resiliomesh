@@ -20,6 +20,13 @@ services:
         sync: false
       - key: SUPABASE_JWT_SECRET   # only if the Supabase project still signs with legacy HS256
         sync: false
+      # judge demo sign-in (docs/API_SETUP.md): secrets, shared privately; DEMO_MODE=false turns it off
+      - key: DEMO_MODE
+        sync: false
+      - key: DEMO_PASSWORD
+        sync: false
+      - key: DEMO_ACCESS_CODE
+        sync: false
       - key: APP_ENV
         value: production
       - key: WORKER_IN_PROCESS

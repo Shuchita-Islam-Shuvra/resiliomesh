@@ -3,7 +3,7 @@ import { expect, test } from '@playwright/test'
 import { PASSWORD, login } from './helpers'
 
 test('auth page has no horizontal scroll on phones', async ({ page }) => {
-  await page.goto('/login')
+  await page.goto('/login?view=form')
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)
   expect(overflow).toBe(false)
 })

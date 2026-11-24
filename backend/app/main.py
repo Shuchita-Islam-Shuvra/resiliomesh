@@ -12,6 +12,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from psycopg import Error as PgError
 
+from .api.demo import router as demo_router
 from .api.routes import router
 from .core.config import get_settings
 from .core.errors import AppError, app_error_handler, db_error_handler
@@ -65,6 +66,7 @@ def create_app() -> FastAPI:
         return {"status": "ok", "service": "resiliomesh-api"}
 
     app.include_router(router)
+    app.include_router(demo_router)
 
     dist = Path(s.frontend_dist) if s.frontend_dist else None
     if dist and (dist / "index.html").is_file():

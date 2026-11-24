@@ -1,6 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ROOT_DIR = Path(__file__).resolve().parents[3]
@@ -16,7 +17,15 @@ class Settings(BaseSettings):
     supabase_jwt_secret: str = ""          # legacy HS256 secret (optional)
     supabase_service_role_key: str = ""    # only used by seed scripts
     database_url: str = ""                 # direct / pooler Postgres connection string
-    demo_password: str = ""                # only for scripts/seed_demo.py
+    # public anon key (same as the website's VITE_SUPABASE_ANON_KEY); used for judge demo sign-in
+    supabase_anon_key: str = Field("", validation_alias=AliasChoices("SUPABASE_ANON_KEY", "VITE_SUPABASE_ANON_KEY"))
+
+    # Judge demo sign-in (one click per demo profile on the sign-in page).
+    # Off unless DEMO_MODE=true AND both secrets are set. The password and the access
+    # code live only in the server environment and are shared privately with judges.
+    demo_mode: bool = False
+    demo_password: str = ""                # password of the *@resiliomesh.demo accounts (scripts/seed_demo.py)
+    demo_access_code: str = ""             # code judges type once before picking a profile
 
     # CORS
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"

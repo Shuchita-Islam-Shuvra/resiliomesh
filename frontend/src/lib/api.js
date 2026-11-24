@@ -22,7 +22,8 @@ async function token() {
 export async function api(path, { method = 'GET', body, timeoutMs = 20000, idempotencyKey, form } = {}) {
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), timeoutMs)
-  const headers = { Authorization: `Bearer ${await token()}` }
+  const t = await token()
+  const headers = t ? { Authorization: `Bearer ${t}` } : {}
   if (body && !form) headers['Content-Type'] = 'application/json'
   if (idempotencyKey) headers['Idempotency-Key'] = idempotencyKey
   let res
@@ -37,6 +38,9 @@ export async function api(path, { method = 'GET', body, timeoutMs = 20000, idemp
     throw new ApiError(0, 'NETWORK', 'Cannot reach the ResilioMesh API.')
   }
   clearTimeout(timer)
+  // a static host without the API answers /api/* with index.html (200): fail loudly, not silently
+  if (res.ok && !(res.headers.get('content-type') || '').includes('application/json'))
+    throw new ApiError(res.status, 'NO_API', 'This website is not connected to the ResilioMesh API. Set VITE_API_URL to the API address and redeploy.')
   const data = await res.json().catch(() => ({}))
   if (!res.ok) {
     const details = Array.isArray(data.details) ? data.details.map((d) => `${d.field}: ${d.message}`).join('; ') : ''

@@ -22,7 +22,7 @@ export const ROLE_OF = {
 }
 
 export async function login(page, who) {
-  await page.goto(`/login?role=${ROLE_OF[who]}`)
+  await page.goto(`/login?role=${ROLE_OF[who]}&view=form`)
   await page.getByLabel('Email').fill(USERS[who])
   await page.getByLabel('Password', { exact: true }).fill(PASSWORD)
   if (SIGNIN_ID[who]) await page.getByLabel(/^(Employee|Staff|Admin) ID/).fill(SIGNIN_ID[who])

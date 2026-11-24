@@ -8,14 +8,14 @@ test('unauthenticated users are redirected to login', async ({ page }) => {
 })
 
 test('login form shows inline validation errors', async ({ page }) => {
-  await page.goto('/login')
+  await page.goto('/login?view=form')
   await page.getByRole('button', { name: 'Sign in', exact: true }).click()
-  await expect(page.getByText('Enter a valid email address')).toBeVisible()
+  await expect(page.getByText('Enter your email address')).toBeVisible()
   await expect(page.getByText('Enter your password')).toBeVisible()
 })
 
 test('wrong password gives a clear error', async ({ page }) => {
-  await page.goto('/login')
+  await page.goto('/login?view=form')
   await page.getByLabel('Email').fill('citizen@resiliomesh.demo')
   await page.getByLabel('Password', { exact: true }).fill('definitely-wrong-1')
   await page.getByRole('button', { name: 'Sign in', exact: true }).click()
@@ -24,7 +24,7 @@ test('wrong password gives a clear error', async ({ page }) => {
 
 test('login form is fully keyboard operable', async ({ page }) => {
   test.skip(!PASSWORD, 'E2E_PASSWORD not set')
-  await page.goto('/login')
+  await page.goto('/login?view=form')
   await page.getByLabel('Email').focus()
   await page.keyboard.type('citizen@resiliomesh.demo')
   await page.keyboard.press('Tab')
@@ -54,7 +54,7 @@ test('citizen cannot open admin or optimiser pages (role-based access)', async (
 
 test('signing in on the wrong role tab is refused with a switch option', async ({ page }) => {
   test.skip(!PASSWORD, 'E2E_PASSWORD not set')
-  await page.goto('/login?role=city_officer')
+  await page.goto('/login?role=city_officer&view=form')
   await page.getByLabel('Email').fill('citizen@resiliomesh.demo')
   await page.getByLabel('Password', { exact: true }).fill(PASSWORD)
   await page.getByLabel('Employee ID').fill('DSCC-OFF-01')
@@ -76,7 +76,7 @@ test('role capsule switches the registration form', async ({ page }) => {
 })
 
 test('staff sign-in asks for the role-specific ID', async ({ page }) => {
-  await page.goto('/login?role=field_worker')
+  await page.goto('/login?role=field_worker&view=form')
   await page.getByRole('button', { name: 'Sign in', exact: true }).click()
   await expect(page.getByText('Enter your Staff ID')).toBeVisible()
   await page.getByRole('tab', { name: 'NGO Coordinator' }).click()
@@ -97,4 +97,18 @@ test('registration accepts Bangladeshi mobile numbers only', async ({ page }) =>
   await page.getByLabel('Mobile (Bangladesh)').fill('+14155550100')
   await page.getByRole('button', { name: 'Create account' }).click()
   await expect(page.getByText(/Bangladeshi mobile number/)).toBeVisible()
+})
+
+test('demo accounts under the sign-in form show only the open role tab', async ({ page }) => {
+  await page.goto('/login?role=city_officer')
+  const box = page.getByRole('region', { name: 'Demo accounts for judges' })
+  // the box hides itself when the server reports DEMO_MODE off
+  test.skip(!(await box.isVisible().catch(() => false)), 'demo mode is off on this server')
+  await expect(page.getByLabel('Email')).toBeVisible()                       // normal form is still there
+  await expect(box.getByRole('button')).toHaveCount(2)                       // only this tab's role (South + North officer)
+  await expect(box.getByRole('button', { name: /Sign in as Tanvir Hasan, Drainage Officer, Dhaka South/ })).toBeEnabled()
+  await expect(box.getByRole('button', { name: /Sign in as Nusrat Jahan, Drainage Officer, Dhaka North/ })).toBeEnabled()
+  await page.getByRole('tab', { name: /Citizen/ }).click()
+  await expect(box.getByRole('button')).toHaveCount(1)
+  await expect(box.getByRole('button', { name: /Sign in as Arif Chowdhury, Citizen/ })).toBeVisible()
 })

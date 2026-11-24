@@ -74,6 +74,34 @@ Alternatives: Railway or Fly.io using `backend/Dockerfile` (build context = repo
 2. Add the three `VITE_*` variables and deploy.
 3. Copy the Vercel URL into Supabase Auth URL settings and into Render `CORS_ORIGINS`.
 
+### Judge demo sign-in (one click per profile)
+Under the normal sign-in form, a **Demo accounts for judges** box lists seven demo people (citizen, two Drainage Officers for
+Dhaka South / North, NGO coordinator, field worker, two admins). A judge clicks one and is signed in, no password (a
+**judge access code** is asked once only if `DEMO_ACCESS_CODE` is set). This follows the rulebook (S03 "provide test access privately", checklist 05
+"no credentials in public files"):
+
+* The demo password stays on the server. The browser never sees it.
+* The optional access code is checked on the server (constant time, 10 tries per minute per IP).
+* The session then goes through the normal server-side staff-ID check, role rules, area rules and audit log.
+
+Set these on **Render** (Environment) and redeploy:
+
+| Variable | Value |
+|---|---|
+| `DEMO_MODE` | `true` (set `false` after judging; the picker then disappears) |
+| `DEMO_PASSWORD` | the password you used with `scripts/seed_demo.py` |
+| `DEMO_ACCESS_CODE` | *optional.* Empty = profiles open with one click, no code. Set a long random code to require it (send it privately, or use the private link below) |
+
+The backend also needs the public anon key. It reads `VITE_SUPABASE_ANON_KEY` (already set for the build)
+or `SUPABASE_ANON_KEY`. Open `/api/demo` to check: it returns `{"enabled": true}` when everything is set.
+If the website is on Vercel, set `VITE_API_URL` there to the Render URL so the picker can reach the API.
+
+**Private judge link:** put the code in the link you send privately, e.g.
+`https://resiliomesh.onrender.com/login#code=<DEMO_ACCESS_CODE>`. Judges open it and just click an account:
+the code is filled in, remembered, and removed from the address bar. The `#` part is never sent to any server.
+Never put this link in the README, the repo or the video.
+
+
 ### Before submission
 * Open the live URL in a private window and log in with every demo role.
 * Call `/api/risk/wards/refresh` once so the map shows live risk.
