@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Activity, FlaskConical, ScrollText, Users } from 'lucide-react'
-import { Alert, Button, Card, Input, PageHeader, Pagination, Select, Spinner, StatCard, Tabs, Th } from '../components/ui'
+import { Activity, Check, FlaskConical, ScrollText, UserCheck, Users, X } from 'lucide-react'
+import { Alert, Button, Card, EmptyState, Input, PageHeader, Pagination, Select, Spinner, StatCard, Tabs, Th } from '../components/ui'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
 import { api } from '../lib/api'
@@ -10,11 +10,21 @@ import { supabase } from '../lib/supabase'
 
 export default function AdminPage() {
   const [tab, setTab] = useState('audit')
+  const [pending, setPending] = useState(undefined)
+  useEffect(() => {
+    const count = () => supabase.from('role_requests').select('id', { count: 'exact', head: true }).eq('status', 'pending')
+      .then(({ count: c, error }) => setPending(error ? undefined : c ?? 0))
+    count()
+    const ch = supabase.channel('admin:role_requests')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'role_requests' }, count).subscribe()
+    return () => { supabase.removeChannel(ch) }
+  }, [])
   return (
     <>
       <PageHeader title="Audit logs & administration" description="Append-only audit trail written by database triggers, account & role management, system health and fault-injection controls." />
-      <Tabs value={tab} onChange={setTab} tabs={[{ value: 'audit', label: 'Audit log' }, { value: 'users', label: 'Users & roles' }, { value: 'system', label: 'System health & chaos' }]} />
+      <Tabs value={tab} onChange={setTab} tabs={[{ value: 'audit', label: 'Audit log' }, { value: 'requests', label: 'Access requests', count: pending || undefined }, { value: 'users', label: 'Users & roles' }, { value: 'system', label: 'System health & chaos' }]} />
       {tab === 'audit' && <Audit />}
+      {tab === 'requests' && <RequestsTab />}
       {tab === 'users' && <UsersTab />}
       {tab === 'system' && <SystemTab />}
     </>
@@ -98,7 +108,7 @@ function UsersTab() {
       <div className="p-4"><Input aria-label="Search users" className="max-w-xs" placeholder="Search name or email…" value={q} onChange={(e) => setQ(e.target.value)} /></div>
       <div className="overflow-x-auto">
         <table className="min-w-full text-sm">
-          <thead className="bg-slate-50"><tr><Th>User</Th><Th>Role</Th><Th>Organisation</Th><Th>Status</Th></tr></thead>
+          <thead className="bg-slate-50"><tr><Th>User</Th><Th>Role</Th><Th>Organisation</Th><Th>Sign-in ID</Th><Th>Status</Th></tr></thead>
           <tbody className="divide-y divide-slate-100">
             {shown.map((u) => (
               <tr key={u.id}>
@@ -114,6 +124,13 @@ function UsersTab() {
                   </Select>
                 </td>
                 <td className="px-3 py-2">
+                  {'employee_id' in u ? (
+                    <Input aria-label={`Sign-in ID for ${u.full_name}`} className="!w-36 !py-1 font-mono text-xs" placeholder={u.role === 'citizen' || u.role === 'ngo_coordinator' ? 'not needed' : 'required'}
+                      defaultValue={u.employee_id || ''} maxLength={30}
+                      onBlur={(e) => { const val = e.target.value.trim(); if (val !== (u.employee_id || '')) update(u, { employee_id: val || null }) }} />
+                  ) : <span className="text-xs text-slate-400">run migration 007</span>}
+                </td>
+                <td className="px-3 py-2">
                   <Button size="sm" variant={u.is_active ? 'secondary' : 'primary'} disabled={u.id === me.id} onClick={() => update(u, { is_active: !u.is_active })}>{u.is_active ? 'Deactivate' : 'Activate'}</Button>
                 </td>
               </tr>
@@ -122,6 +139,104 @@ function UsersTab() {
         </table>
       </div>
       <p className="px-4 pb-4 text-xs text-slate-500">Role changes are enforced in the database (trigger + RLS): non-admins cannot escalate privileges even via the raw API, and admins cannot change their own role.</p>
+    </Card>
+  )
+}
+
+function RequestsTab() {
+  const toast = useToast()
+  const [status, setStatus] = useState('pending')
+  const [rows, setRows] = useState(null)
+  const [err, setErr] = useState('')
+  const [orgs, setOrgs] = useState([])
+  const [pick, setPick] = useState({})      // request id -> chosen org id
+  const [notes, setNotes] = useState({})    // request id -> review note
+  const [busy, setBusy] = useState(null)
+  const load = useCallback(async () => {
+    const { data, error } = await supabase.from('role_requests')
+      .select('*, applicant:profiles!role_requests_user_id_fkey(full_name, email, phone, role), organizations(name), wards(name)')
+      .eq('status', status).order('created_at', { ascending: false }).limit(200)
+    if (error) {
+      setErr(/does not exist|schema cache/i.test(error.message)
+        ? 'The access-request table is missing. Run supabase/migrations/006_role_requests.sql in the Supabase SQL editor.'
+        : errorMessage(error))
+      setRows([]); return
+    }
+    setErr(''); setRows(data || [])
+  }, [status])
+  useEffect(() => { load() }, [load])
+  useEffect(() => { supabase.from('organizations').select('id,name,type').order('name').then(({ data }) => setOrgs(data || [])) }, [])
+
+  const review = async (r, approve) => {
+    const org = pick[r.id] ?? r.organization_id ?? ''
+    if (approve && !org) { toast.error('Choose the organisation this person belongs to before approving'); return }
+    if (!approve && !(notes[r.id] || '').trim()) { toast.error('Add a short reason so the applicant knows why'); return }
+    setBusy(r.id)
+    const { error } = await supabase.rpc('rm_review_role_request', { p_id: r.id, p_approve: approve, p_org_id: org || null, p_note: notes[r.id] || null })
+    setBusy(null)
+    if (error) toast.error(errorMessage(error))
+    else { toast.success(`${r.applicant?.full_name || 'Request'} ${approve ? `approved as ${ROLE_LABEL[r.requested_role]}` : 'rejected'}`); load() }
+  }
+
+  return (
+    <Card bodyClass="p-0">
+      <div className="flex flex-wrap items-center gap-2 p-4">
+        <Select aria-label="Filter by status" className="max-w-[180px]" value={status} onChange={(e) => setStatus(e.target.value)}>
+          <option value="pending">Pending</option><option value="approved">Approved</option><option value="rejected">Rejected</option>
+        </Select>
+        <p className="text-xs text-slate-500">Staff sign-ups start as Citizen. Approving grants the requested role and organisation.</p>
+      </div>
+      {err && <div className="px-4 pb-4"><Alert tone="error">{err}</Alert></div>}
+      {!rows ? <Spinner /> : rows.length === 0 ? (!err && <EmptyState icon={UserCheck} title={`No ${status} requests`}>New staff sign-ups will appear here.</EmptyState>) : (
+        <div className="overflow-x-auto">
+          <table className="min-w-full text-sm">
+            <thead className="bg-slate-50"><tr><Th>Applicant</Th><Th>Requested role</Th><Th>Details</Th><Th>Organisation</Th><Th>{status === 'pending' ? 'Decision' : 'Reviewed'}</Th></tr></thead>
+            <tbody className="divide-y divide-slate-100">
+              {rows.map((r) => (
+                <tr key={r.id} className="align-top">
+                  <td className="px-3 py-2">
+                    <p className="font-medium">{r.applicant?.full_name}</p>
+                    <p className="text-xs text-slate-500">{r.applicant?.email}</p>
+                    <p className="text-xs text-slate-500">{r.applicant?.phone}</p>
+                    <p className="mt-1 text-[11px] text-slate-400">{fmtDateTime(r.created_at)}</p>
+                  </td>
+                  <td className="px-3 py-2"><span className="whitespace-nowrap rounded-full bg-brand-50 px-2 py-0.5 text-xs font-semibold text-brand-700 ring-1 ring-inset ring-brand-200">{ROLE_LABEL[r.requested_role]}</span></td>
+                  <td className="px-3 py-2 text-xs text-slate-600">
+                    {r.employee_id && <p>ID: <span className="font-mono">{r.employee_id}</span></p>}
+                    {r.designation && <p>{r.designation}</p>}
+                    {r.team && <p>Team: {r.team}</p>}
+                    {r.wards?.name && <p>Area: {r.wards.name}</p>}
+                    {r.registration_no && <p>NGOAB reg: {r.registration_no}</p>}
+                  </td>
+                  <td className="px-3 py-2 text-xs">
+                    {status === 'pending' ? (
+                      <>
+                        <Select aria-label={`Organisation for ${r.applicant?.full_name}`} className="!w-auto !py-1 text-xs" value={pick[r.id] ?? r.organization_id ?? ''} onChange={(e) => setPick({ ...pick, [r.id]: e.target.value })}>
+                          <option value="">Choose…</option>{orgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+                        </Select>
+                        {!r.organization_id && r.organization_name && <p className="mt-1 text-amber-700">Applicant typed: “{r.organization_name}” (not listed)</p>}
+                      </>
+                    ) : (r.organizations?.name || r.organization_name || '—')}
+                  </td>
+                  <td className="px-3 py-2">
+                    {status === 'pending' ? (
+                      <div className="flex min-w-[220px] flex-col gap-2">
+                        <Input aria-label="Review note" className="!py-1 text-xs" placeholder="Note (required to reject)" maxLength={300} value={notes[r.id] || ''} onChange={(e) => setNotes({ ...notes, [r.id]: e.target.value })} />
+                        <div className="flex gap-2">
+                          <Button size="sm" loading={busy === r.id} onClick={() => review(r, true)}><Check className="h-3.5 w-3.5" />Approve</Button>
+                          <Button size="sm" variant="secondary" disabled={busy === r.id} onClick={() => review(r, false)}><X className="h-3.5 w-3.5" />Reject</Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="text-xs text-slate-600"><p>{fmtDateTime(r.reviewed_at)}</p>{r.review_note && <p className="mt-1 italic">“{r.review_note}”</p>}</div>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </Card>
   )
 }

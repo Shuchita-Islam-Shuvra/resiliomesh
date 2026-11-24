@@ -9,10 +9,23 @@ export const USERS = {
   citizen: 'citizen@resiliomesh.demo',
 }
 
+// role-specific sign-in IDs set by migration 007 / seed_demo.py
+export const SIGNIN_ID = {
+  admin: 'ADM-001', officer: 'DSCC-OFF-01', officer2: 'DNCC-OFF-02', field: 'FW-001',
+}
+
+// capsule tab each demo account must sign in on
+export const ROLE_OF = {
+  admin: 'admin', officer: 'city_officer', officer2: 'city_officer', ngo: 'ngo_coordinator',
+  ngo2: 'ngo_coordinator', field: 'field_worker', citizen: 'citizen',
+}
+
 export async function login(page, who) {
-  await page.goto('/login')
+  await page.goto(`/login?role=${ROLE_OF[who]}`)
   await page.getByLabel('Email').fill(USERS[who])
-  await page.getByLabel('Password').fill(PASSWORD)
-  await page.getByRole('button', { name: 'Sign in' }).click()
+  await page.getByLabel('Password', { exact: true }).fill(PASSWORD)
+  if (SIGNIN_ID[who]) await page.getByLabel(/^(Employee|Staff|Admin) ID/).fill(SIGNIN_ID[who])
+  if (who.startsWith('ngo')) await page.getByLabel('NGO', { exact: true }).selectOption({ label: who === 'ngo' ? 'Shobar Jonno Relief Network' : 'Nodi Humanitarian Foundation' })
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click()
   await page.waitForURL('**/dashboard')
 }

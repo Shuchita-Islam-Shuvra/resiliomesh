@@ -37,6 +37,11 @@ ORG = {
     "nodi": "11111111-1111-1111-1111-111111111104",
     "ops": "11111111-1111-1111-1111-111111111105",
 }
+# sign-in IDs shown on the login page's demo box (City Officer / Field Worker / Admin)
+STAFF_IDS = {
+    "admin@resiliomesh.demo": "ADM-001", "officer@resiliomesh.demo": "DSCC-OFF-01", "officer2@resiliomesh.demo": "DNCC-OFF-02",
+    "field1@resiliomesh.demo": "FW-001", "field2@resiliomesh.demo": "FW-002", "field3@resiliomesh.demo": "FW-003",
+}
 USERS = [
     ("admin@resiliomesh.demo", "Farhana Rahman", "admin", "ops", None),
     ("officer@resiliomesh.demo", "Tanvir Hasan", "city_officer", "south", "DSCC-04"),
@@ -112,6 +117,12 @@ def main() -> None:
         for email, name, role, org, ward in USERS:
             conn.execute("""update profiles set full_name=%s, role=%s, organization_id=%s, ward_id=%s, is_active=true, email=%s
                             where id=%s""", (name, role, ORG[org] if org else None, ward, email, ids[email]))
+            if email in STAFF_IDS:   # role-specific sign-in ID (migration 007)
+                conn.execute("savepoint sid")
+                try:
+                    conn.execute("update profiles set employee_id=%s where id=%s", (STAFF_IDS[email], ids[email]))
+                except psycopg.errors.UndefinedColumn:
+                    conn.execute("rollback to savepoint sid")
         conn.commit()
 
         if conn.execute("select count(*) n from incidents where title like 'DEMO:%%' or reporter_id = any(%s::uuid[])",

@@ -48,12 +48,106 @@ export function validateResource(v) {
   return e
 }
 
-export function validateRegister(v) {
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/
+const NAME = /^[\p{L}][\p{L}\p{M} .'-]{1,99}$/u
+const EMPLOYEE_ID = /^[A-Za-z0-9/-]{3,30}$/
+// Bangladesh mobile: +8801XXXXXXXXX or 01XXXXXXXXX (operator digit 3–9)
+const BD_MOBILE = /^(?:\+?88)?01[3-9][0-9]{8}$/
+
+export const normalizePhone = (p = '') => p.replace(/[\s-]/g, '')
+
+export function validateEmail(email) {
+  const s = (email || '').trim()
+  if (!s) return 'Enter your email address'
+  if (!EMAIL.test(s) || s.length > 254) return 'Enter a valid email address'
+  return null
+}
+
+/** 0–4 strength score + label, used by the sign-up meter. */
+export function passwordStrength(pw = '') {
+  if (!pw) return { score: 0, label: '' }
+  let s = 0
+  if (pw.length >= 8) s++
+  if (pw.length >= 12) s++
+  if (/[a-z]/.test(pw) && /[A-Z]/.test(pw)) s++
+  if (/[0-9]/.test(pw) && /[^A-Za-z0-9]/.test(pw)) s++
+  if (pw.length < 8) s = Math.min(s, 1)
+  return { score: s, label: ['Too weak', 'Weak', 'Fair', 'Good', 'Strong'][s] }
+}
+
+export function validatePassword(pw, { email, staff } = {}) {
+  if (!pw) return 'Choose a password'
+  if (pw.length < 8) return 'Password must be at least 8 characters'
+  if (pw.length > 72) return 'Password must be at most 72 characters'
+  if (!/[0-9]/.test(pw) || !/[A-Za-z]/.test(pw)) return 'Use letters and numbers'
+  if (/\s/.test(pw)) return 'Password cannot contain spaces'
+  const local = (email || '').split('@')[0].toLowerCase()
+  if (local.length >= 4 && pw.toLowerCase().includes(local)) return 'Password must not contain your email name'
+  if (staff && (pw.length < 10 || !/[A-Z]/.test(pw) || !/[a-z]/.test(pw) || !/[^A-Za-z0-9]/.test(pw)))
+    return 'Staff passwords need 10+ characters with upper & lower case, a number and a symbol'
+  return null
+}
+
+/**
+ * Role-aware sign-up validation. Optional keys (confirm_password, accept_terms)
+ * are only checked when present so older callers keep working.
+ */
+export function validateRegister(v, role = 'citizen') {
   const e = {}
-  if (!v.full_name || v.full_name.trim().length < 2) e.full_name = 'Enter your full name'
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.email || '')) e.email = 'Enter a valid email'
-  if (!v.password || v.password.length < 8) e.password = 'Password must be at least 8 characters'
-  else if (!/[0-9]/.test(v.password) || !/[A-Za-z]/.test(v.password)) e.password = 'Use letters and numbers'
-  if (v.phone && !PHONE.test(v.phone.replace(/[\s-]/g, ''))) e.phone = 'Enter a valid phone, e.g. +8801712345678'
+  const staff = role !== 'citizen'
+  const name = (v.full_name || '').trim()
+  if (name.length < 2) e.full_name = 'Enter your full name'
+  else if (!NAME.test(name)) e.full_name = 'Use letters only (spaces, dot, hyphen and apostrophe allowed)'
+
+  const em = validateEmail(v.email)
+  if (em) e.email = em
+
+  const pw = validatePassword(v.password, { email: v.email, staff })
+  if (pw) e.password = pw
+  if ('confirm_password' in v && v.confirm_password !== v.password) e.confirm_password = 'Passwords do not match'
+
+  const phone = normalizePhone(v.phone)
+  if (staff && !phone) e.phone = 'Mobile number is required for staff accounts'
+  else if (phone && !(PHONE.test(phone) && (!staff || BD_MOBILE.test(phone)))) e.phone = 'Enter a valid phone, e.g. +8801712345678'
+
+  if (role === 'city_officer') {
+    if (!v.organization_id) e.organization_id = 'Choose your city authority'
+    if (!EMPLOYEE_ID.test((v.employee_id || '').trim())) e.employee_id = 'Employee ID: 3–30 letters, numbers, / or -'
+    if ((v.designation || '').trim().length < 2) e.designation = 'Enter your designation'
+  }
+  if (role === 'ngo_coordinator') {
+    if (!v.organization_id) e.organization_id = 'Choose your NGO'
+    if (v.organization_id === 'other') {
+      const n = (v.organization_name || '').trim()
+      if (n.length < 3 || n.length > 120) e.organization_name = 'Enter the NGO name (3–120 characters)'
+      if (!/^[A-Za-z0-9/-]{3,40}$/.test((v.registration_no || '').trim())) e.registration_no = 'Enter the NGO Affairs Bureau registration no.'
+    }
+    if ((v.designation || '').trim().length < 2) e.designation = 'Enter your designation'
+    if (!v.ward_id) e.ward_id = 'Choose the main area you operate in'
+  }
+  if (role === 'field_worker') {
+    if (!v.organization_id) e.organization_id = 'Choose the organisation you work for'
+    if (!EMPLOYEE_ID.test((v.employee_id || '').trim())) e.employee_id = 'Staff ID: 3–30 letters, numbers, / or -'
+    if (!v.team) e.team = 'Choose your team'
+    if (!v.ward_id) e.ward_id = 'Choose your assigned area'
+  }
+  if ('accept_terms' in v && !v.accept_terms) e.accept_terms = 'You must accept the terms to continue'
+  return e
+}
+
+// label of the extra sign-in identifier per role (null = email + password only)
+export const SIGNIN_ID_LABEL = { city_officer: 'Employee ID', field_worker: 'Staff ID', admin: 'Admin ID' }
+
+export function validateSignIn({ email, password, employee_id, organization_id }, role = 'citizen') {
+  const e = {}
+  const em = validateEmail(email)
+  if (em) e.email = em
+  if (!password) e.password = 'Enter your password'
+  const idLabel = SIGNIN_ID_LABEL[role]
+  if (idLabel) {
+    if (!(employee_id || '').trim()) e.employee_id = `Enter your ${idLabel}`
+    else if (!EMPLOYEE_ID.test(employee_id.trim())) e.employee_id = `${idLabel}: 3–30 letters, numbers, / or -`
+  }
+  if (role === 'ngo_coordinator' && !organization_id) e.organization_id = 'Choose your NGO'
   return e
 }

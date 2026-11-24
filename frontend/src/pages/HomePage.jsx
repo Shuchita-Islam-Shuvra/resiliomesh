@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
-import { ArrowRight, BrainCircuit, CloudRain, HandHeart, LayoutDashboard, ShieldCheck, Smartphone, Workflow } from 'lucide-react'
+import { ArrowRight, BrainCircuit, CheckCircle2, CloudRain, HandHeart, LayoutDashboard, LogIn, ShieldCheck, Smartphone, UserPlus, Workflow } from 'lucide-react'
+import RoleCapsule from '../components/RoleCapsule'
 import { useAuth } from '../context/AuthContext'
+import { ROLE_BY_KEY } from '../lib/roles'
 
 const MODULES = [
   {
@@ -71,6 +73,50 @@ function Showcase({ reduce }) {
   )
 }
 
+// Capsule role picker in the middle of the home page: pick a user type, then sign in / sign up as it.
+function RolePicker() {
+  const [role, setRole] = useState('citizen')
+  const r = ROLE_BY_KEY[role]
+  const Icon = r.icon
+  return (
+    <section aria-labelledby="role-heading" className="relative overflow-hidden border-t border-slate-200/70 bg-gradient-to-b from-white to-brand-50/40">
+      <div className="mx-auto flex max-w-6xl flex-col items-center px-4 py-14 sm:px-6 lg:py-20">
+        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-brand-700">Choose your portal</p>
+        <h2 id="role-heading" className="mt-2 scroll-mt-28 text-center text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">Who are you signing in as?</h2>
+        <p className="mx-auto mt-2 max-w-xl text-center text-sm text-slate-600">Every user type gets its own sign-in, sign-up form and workspace.</p>
+        <RoleCapsule value={role} onChange={setRole} className="mt-8 bg-white shadow-lg shadow-slate-200/70" />
+        <AnimatePresence mode="wait">
+          <motion.div key={role} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.22 }}
+            className="mt-6 w-full max-w-2xl rounded-3xl bg-white p-6 shadow-sm ring-1 ring-slate-200 sm:p-8">
+            <div className="flex items-start gap-4">
+              <span className="rounded-2xl bg-brand-50 p-3 text-brand-700 ring-1 ring-inset ring-brand-100"><Icon className="h-6 w-6" aria-hidden /></span>
+              <div className="min-w-0">
+                <h3 className="text-lg font-semibold text-slate-900">{r.label}</h3>
+                <p className="mt-1 text-sm text-slate-600">{r.tagline}</p>
+              </div>
+            </div>
+            <ul className="mt-5 grid gap-2 sm:grid-cols-3">
+              {r.points.map((p) => <li key={p} className="flex gap-2 text-sm text-slate-600"><CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-brand-600" aria-hidden />{p}</li>)}
+            </ul>
+            <div className="mt-6 flex flex-wrap gap-3">
+              <Link to={`/login?role=${role}`} className="inline-flex items-center gap-2 rounded-full bg-brand-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-700">
+                <LogIn className="h-4 w-4" aria-hidden />Sign in as {r.label}
+              </Link>
+              {r.selfRegister ? (
+                <Link to={`/register?role=${role}`} className="inline-flex items-center gap-2 rounded-full bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 ring-1 ring-inset ring-slate-300 transition hover:bg-slate-50">
+                  <UserPlus className="h-4 w-4" aria-hidden />{r.selfRegister === 'request' ? 'Request access' : 'Create account'}
+                </Link>
+              ) : (
+                <span className="self-center text-xs text-slate-500">Admin accounts are created by an existing administrator.</span>
+              )}
+            </div>
+          </motion.div>
+        </AnimatePresence>
+      </div>
+    </section>
+  )
+}
+
 export default function HomePage() {
   const { session } = useAuth()
   const reduce = useReducedMotion()
@@ -89,7 +135,7 @@ export default function HomePage() {
               </Link>
             ) : (
               <>
-                <Link to="/login" className="rounded-lg px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100">Sign in</Link>
+                <a href="#role-heading" className="rounded-lg px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100">Sign in</a>
                 <Link to="/register" className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-700">Sign up</Link>
               </>
             )}
@@ -116,9 +162,9 @@ export default function HomePage() {
                 {session ? 'Open dashboard' : 'Create an account'}<ArrowRight className="h-4 w-4" aria-hidden />
               </Link>
               {!session && (
-                <Link to="/login" className="inline-flex items-center rounded-lg bg-white px-5 py-3 text-sm font-semibold text-slate-700 ring-1 ring-inset ring-slate-300 transition hover:bg-slate-50">
+                <a href="#role-heading" className="inline-flex items-center rounded-lg bg-white px-5 py-3 text-sm font-semibold text-slate-700 ring-1 ring-inset ring-slate-300 transition hover:bg-slate-50">
                   Sign in
-                </Link>
+                </a>
               )}
             </motion.div>
             <motion.ul variants={fadeUp} className="mt-8 flex flex-wrap gap-x-6 gap-y-3 text-sm text-slate-600">
@@ -130,6 +176,9 @@ export default function HomePage() {
 
           <Showcase reduce={reduce} />
         </section>
+
+        {/* ------------------------------------------------ role capsule: pick a user type */}
+        {!session && <RolePicker />}
 
         {/* ------------------------------------------------ three modules: picture on top, text below */}
         <section className="border-t border-slate-200/70 bg-white/60">
