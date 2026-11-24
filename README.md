@@ -1,6 +1,7 @@
 # ResilioMesh
 
 **Autonomous urban flood resilience & humanitarian resource intelligence for Dhaka.**
+n**🌐 Live demo: [https://resiliomesh.vercel.app](https://resiliomesh.vercel.app)**
 *Predict risk · Optimise resources · Coordinate response.*
 
 | Field | Value |
@@ -10,7 +11,7 @@
 | Declared advanced challenges | **A02 — Intelligent Decisions & Optimization** and **A05 — Concurrency & Transaction Management** |
 | Also implemented (not declared) | A01, A03, A04, A06, A07, A08 |
 | SDGs | 6, 11, 13, 17 |
-| Live app | `https://<your-app>.vercel.app` |
+| Live app | **[resiliomesh.vercel.app](https://resiliomesh.vercel.app)** |
 | API | `https://<your-api>.onrender.com/docs` |
 | Video | `https://youtu.be/<id>` |
 
