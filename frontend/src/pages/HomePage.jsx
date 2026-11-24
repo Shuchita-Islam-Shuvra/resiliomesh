@@ -35,21 +35,21 @@ const SLIDES = [
   { img: '/images/hero-relief.webp', caption: 'Relief coordination: stock, needs and deliveries across NGOs', pan: ['2%', '-2%'] },
   { img: '/images/hero-field.webp', caption: 'Field work: tasks on a tablet, saved offline, synced on reconnect', pan: ['0%', '3%'] },
 ]
-const SLIDE_MS = 5500
+const SLIDE_MS = 3000
+const FADE_S = 0.7
 
+// Slides advance continuously, one after another (no hover pause, no indicators).
 function Showcase({ reduce }) {
   const [i, setI] = useState(0)
-  const [paused, setPaused] = useState(false)
   useEffect(() => {
-    if (reduce || paused) return
+    if (reduce) return
     const t = setTimeout(() => setI((n) => (n + 1) % SLIDES.length), SLIDE_MS)
     return () => clearTimeout(t)
-  }, [i, reduce, paused])
+  }, [i, reduce])
   const s = SLIDES[i]
 
   return (
-    <motion.div className="relative" initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.6, ease: 'easeOut' }}
-      onMouseEnter={() => setPaused(true)} onMouseLeave={() => setPaused(false)}>
+    <motion.div className="relative" initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.6, ease: 'easeOut' }}>
       <div aria-hidden className="absolute -inset-4 rounded-[2rem] bg-gradient-to-tr from-brand-200/60 via-sky-200/40 to-transparent blur-2xl" />
       <div className="relative aspect-[16/9] overflow-hidden rounded-3xl bg-ink-900 shadow-2xl shadow-slate-900/25 ring-1 ring-slate-900/5">
         <AnimatePresence initial={false}>
@@ -58,22 +58,8 @@ function Showcase({ reduce }) {
             initial={{ opacity: 0, scale: 1.04, x: s.pan[0] }}
             animate={reduce ? { opacity: 1, scale: 1.04 } : { opacity: 1, scale: 1.16, x: s.pan[1] }}
             exit={{ opacity: 0 }}
-            transition={{ opacity: { duration: 1.1, ease: 'easeInOut' }, default: { duration: (SLIDE_MS + 1500) / 1000, ease: 'linear' } }} />
+            transition={{ opacity: { duration: FADE_S, ease: 'easeInOut' }, default: { duration: SLIDE_MS / 1000 + FADE_S, ease: 'linear' } }} />
         </AnimatePresence>
-        {/* story-style progress bars (no text on the picture) */}
-        <div className="absolute inset-x-4 bottom-3 flex gap-1.5">
-          {SLIDES.map((sl, n) => (
-            <button key={sl.img} type="button" onClick={() => setI(n)} aria-label={`Show slide ${n + 1}`}
-              className="h-1.5 flex-1 overflow-hidden rounded-full bg-white/30 backdrop-blur">
-              {n < i && <span className="block h-full w-full bg-white" />}
-              {n === i && (
-                <motion.span key={`${i}-${paused}`} className="block h-full bg-white"
-                  initial={{ width: paused ? '100%' : '0%' }} animate={{ width: '100%' }}
-                  transition={{ duration: paused || reduce ? 0 : SLIDE_MS / 1000, ease: 'linear' }} />
-              )}
-            </button>
-          ))}
-        </div>
       </div>
       <AnimatePresence mode="wait">
         <motion.p key={s.caption} className="relative mt-4 text-center text-sm text-slate-600"
