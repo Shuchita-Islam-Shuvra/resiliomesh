@@ -19,7 +19,7 @@ export const domainMatches = (domain, allowed = []) =>
 /**
  * Why this e-mail cannot be used for the requested staff role (null = fine).
  * @param org       the chosen organisation ({ email_domains }) or null / 'other'
- * @param allOrgs   every public organisation (drainage officers without a choice)
+ * @param allOrgs   every public organisation (water resilience officers without a choice)
  */
 export function emailPolicyError(email, role, org, allOrgs = []) {
   const d = emailDomain(email)
@@ -74,6 +74,8 @@ export const BLOCKER_LABEL = {
   email_domain: 'E-mail domain not allowed for this role',
   email_unconfirmed: 'E-mail address not confirmed',
   phone_unverified: 'Mobile number not verified (OTP)',
+  phone_missing: 'No mobile number on the account (needed to make sure one person holds one NGO post)',
+  ngo_seat_taken: 'This person already holds an NGO Coordinator post on another account (same mobile number)',
   documents_missing: 'No ID card / appointment letter uploaded',
   account_inactive: 'Account is deactivated',
 }
@@ -82,6 +84,7 @@ export const FLAG_LABEL = {
   email_domain: 'e-mail domain', roster: 'staff roster', ngoab: 'NGOAB registration',
   roster_uploaded_by_reviewer: 'you uploaded the matching roster entry',
   ngoab_uploaded_by_reviewer: 'you uploaded the matching NGOAB entry',
+  ngo_transfer: 'moves an NGO Coordinator from another NGO; the old post ends',
 }
 
 // Signals the database attaches to citizen reports (shown to staff only).

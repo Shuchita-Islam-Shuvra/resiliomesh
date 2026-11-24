@@ -11,9 +11,9 @@ Track: **World Problem Solver**. Declared advanced challenges: **A02** and **A05
 | Role | What they do |
 |---|---|
 | Citizen | Report waterlogging, track their own reports, see risk for their ward |
-| Drainage officer (Dhaka North or Dhaka South) | Verify reports, run AI assessment, plan and approve resources in their own area; read-only elsewhere |
-| NGO coordinator | Manage own organisation's stock and community needs, allocate aid |
-| Field worker | Receive tasks, work offline, update task status |
+| Water Resilience Officer (Dhaka North or Dhaka South) | Verify reports, run AI assessment, plan and approve resources in their own area; read-only elsewhere |
+| NGO coordinator (city-wide, one NGO per person) | Manage own organisation's stock and community needs anywhere in Dhaka (North and South), allocate aid. One person holds one coordinator post; a move to another NGO is a two-admin transfer |
+| Field worker (city-wide) | Receive tasks anywhere in Dhaka, work offline, update task status |
 | Admin | Users and roles, audit log, system health, fault injection |
 
 ## Frontend pages (React 19 + Vite + Tailwind, PWA)

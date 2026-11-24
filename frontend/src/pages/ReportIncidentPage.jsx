@@ -9,6 +9,8 @@ import { useToast } from '../context/ToastContext'
 import { useOnline } from '../hooks/useOnline'
 import { enqueue } from '../offline/db'
 import { errorMessage } from '../lib/errors'
+import { areaAt, areaLabel } from '../lib/areas'
+import { useWardAreas } from '../hooks/useWardAreas'
 import { CATEGORY_LABEL, uuid } from '../lib/format'
 import { supabase } from '../lib/supabase'
 import { validateReport } from '../lib/validation'
@@ -16,7 +18,7 @@ import { validateReport } from '../lib/validation'
 const INIT = { title: '', description: '', category: 'waterlogging', ward_id: '', asset_id: '', severity_reported: 3, water_depth_cm: '', people_affected: 0, lat: '', lng: '' }
 
 export default function ReportIncidentPage() {
-  const { profile, security } = useAuth()
+  const { profile, security, area } = useAuth()
   const toast = useToast()
   const online = useOnline()
   const nav = useNavigate()
@@ -26,7 +28,8 @@ export default function ReportIncidentPage() {
   const [errors, setErrors] = useState({})
   const [busy, setBusy] = useState(false)
   const [nearby, setNearby] = useState([])
-  const [clientId] = useState(uuid)          // stable per form -> double-submit safe
+  const [clientId] = useState(uuid)
+  const wardAreas = useWardAreas()          // stable per form -> double-submit safe
 
   useEffect(() => { supabase.from('wards').select('id,name,lat,lng').order('name').then(({ data }) => setWards(data || [])) }, [])
   useEffect(() => {
@@ -60,6 +63,11 @@ export default function ReportIncidentPage() {
   const submit = async (e) => {
     e.preventDefault()
     const errs = validateReport(v)
+    // Water Resilience Officers report only in their own area (their ward list is that area only)
+    // (a place belongs to the area of its nearest ward centre; the database checks the same)
+    const pinArea = !errs.location && area ? areaAt(wardAreas, Number(v.lat), Number(v.lng)) : null
+    if (pinArea && pinArea !== area)
+      errs.location = `This place is in ${areaLabel(pinArea)}. You can report only inside your area (${areaLabel(area)}).`
     setErrors(errs)
     if (Object.keys(errs).length) { toast.error('Please fix the highlighted fields'); return }
     const payload = {

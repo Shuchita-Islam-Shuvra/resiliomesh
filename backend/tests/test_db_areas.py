@@ -1,8 +1,8 @@
-"""Drainage Officer areas (migration 009) against a REAL database.
+"""Water Resilience Officer areas (migration 009) against a REAL database.
 
-A Drainage Officer of the South authority (DSCC) may only change things in
-Dhaka South wards, and the other way round. Admins stay city-wide. Officers can
-still read the whole city.
+A Water Resilience Officer of the South authority (DSCC) may only change things in
+Dhaka South wards, and the other way round. Admins stay city-wide. Since
+migration 011 officers also only SEE their own area.
 
     TEST_DATABASE_URL=postgresql://... pytest tests/test_db_areas.py -v
 """
@@ -101,12 +101,32 @@ def test_admin_is_city_wide(people):
     assert verify(people["admin"], incident(people, "DSCC"))["ok"] is True
 
 
-def test_officer_can_read_but_not_edit_the_other_area(people):
+def test_officer_can_neither_see_nor_edit_the_other_area(people):
     inc = incident(people, "DNCC")
     with as_user(people["south"]) as c:
-        assert c.execute("select id from incidents where id=%s", (inc["id"],)).fetchone() is not None
+        assert c.execute("select id from incidents where id=%s", (inc["id"],)).fetchone() is None
         changed = c.execute("update incidents set priority=99 where id=%s returning id", (inc["id"],)).fetchall()
     assert changed == []
+    with as_user(people["north"]) as c:
+        assert c.execute("select id from incidents where id=%s", (inc["id"],)).fetchone() is not None
+
+
+def test_officer_sees_only_own_area_everywhere(people):
+    incident(people, "DNCC"), incident(people, "DSCC")
+    with as_user(people["south"]) as c:
+        areas = {r["city_corporation"] for r in c.execute("select city_corporation from wards").fetchall()}
+        assert areas == {"DSCC"}
+        assert {r["city_corporation"] for r in c.execute("select city_corporation from ward_risk_summary()").fetchall()} == {"DSCC"}
+        north = c.execute("""select count(*) n from incidents i join wards w on w.id = i.ward_id
+                             where w.city_corporation = 'DNCC'""").fetchone()["n"]
+        assert north == 0
+        assert c.execute("""select count(*) n from drainage_assets a
+                            where left(a.ward_id, 4) = 'DNCC'""").fetchone()["n"] == 0
+        by_ward = c.execute("select analytics_dashboard(30, null) d").fetchone()["d"]["by_ward"]
+        assert by_ward and all(w["ward_id"].startswith("DSCC-") for w in by_ward)
+    with as_user(people["admin"]) as c:
+        areas = {r["city_corporation"] for r in c.execute("select city_corporation from wards").fetchall()}
+        assert areas == {"DNCC", "DSCC"}
 
 
 def test_officer_cannot_move_an_incident_into_the_other_area(people):
@@ -188,3 +208,41 @@ def test_backend_blocks_ai_assessment_and_planning_outside_area(people, backend_
     with pytest.raises(AppError) as e:
         planning.create_plan([str(assessed["id"])], Constraints(), south)
     assert e.value.status_code == 403
+
+
+# ------------------------------------------------------------------ 012: every North / South person
+def test_city_corporation_field_worker_sees_only_own_area(people):
+    north_inc, south_inc = incident(people, "DNCC"), incident(people, "DSCC")
+    south_worker, ngo_worker = staff("field_worker", SOUTH), staff("field_worker", SHOBAR)
+    with as_user(south_worker) as c:
+        assert {r["city_corporation"] for r in c.execute("select city_corporation from wards").fetchall()} == {"DSCC"}
+        assert c.execute("select id from incidents where id=%s", (north_inc["id"],)).fetchone() is None
+        assert c.execute("select id from incidents where id=%s", (south_inc["id"],)).fetchone() is not None
+    with as_user(ngo_worker) as c:                                   # NGO crews stay city-wide
+        assert {r["city_corporation"] for r in c.execute("select city_corporation from wards").fetchall()} == {"DNCC", "DSCC"}
+
+
+def _report(c, area):
+    lat, lng = random_dhaka_point(area)
+    ward = c.execute("select ward_id from ward_areas() order by (lat-%s)^2 + (lng-%s)^2 limit 1", (lat, lng)).fetchone()["ward_id"]
+    c.execute("""insert into incidents(reporter_id, ward_id, category, title, description, severity_reported,
+                                       people_affected, lat, lng)
+                 values (auth.uid(),%s,'waterlogging','Area guard test','Area guard test description',3,1,%s,%s)""",
+              (ward, lat, lng))
+
+
+def test_area_bound_staff_report_only_in_own_area(people):
+    with as_user(people["south"]) as c:
+        _report(c, "DSCC")
+    with pytest.raises(psycopg.errors.InsufficientPrivilege):
+        with as_user(people["south"]) as c:
+            _report(c, "DNCC")
+    with as_user(people["admin"]) as c:                               # admins anywhere
+        _report(c, "DNCC")
+
+
+def test_ward_areas_is_public_geometry_only(people):
+    with as_user(people["south"]) as c:
+        rows = c.execute("select * from ward_areas()").fetchall()
+    assert {r["city_corporation"] for r in rows} == {"DNCC", "DSCC"}
+    assert set(rows[0]) == {"ward_id", "city_corporation", "lat", "lng"}

@@ -106,8 +106,8 @@ test('demo accounts under the sign-in form show only the open role tab', async (
   test.skip(!(await box.isVisible().catch(() => false)), 'demo mode is off on this server')
   await expect(page.getByLabel('Email')).toBeVisible()                       // normal form is still there
   await expect(box.getByRole('button')).toHaveCount(2)                       // only this tab's role (South + North officer)
-  await expect(box.getByRole('button', { name: /Sign in as Tanvir Hasan, Drainage Officer, Dhaka South/ })).toBeEnabled()
-  await expect(box.getByRole('button', { name: /Sign in as Nusrat Jahan, Drainage Officer, Dhaka North/ })).toBeEnabled()
+  await expect(box.getByRole('button', { name: /Sign in as Tanvir Hasan, Water Resilience Officer, Dhaka South/ })).toBeEnabled()
+  await expect(box.getByRole('button', { name: /Sign in as Nusrat Jahan, Water Resilience Officer, Dhaka North/ })).toBeEnabled()
   await page.getByRole('tab', { name: /Citizen/ }).click()
   await expect(box.getByRole('button')).toHaveCount(1)
   await expect(box.getByRole('button', { name: /Sign in as Arif Chowdhury, Citizen/ })).toBeVisible()

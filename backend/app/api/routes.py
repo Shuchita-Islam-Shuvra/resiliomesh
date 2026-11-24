@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, File, Header, UploadFile
 from pydantic import BaseModel, Field, field_validator
 
 from ..core import db
+from ..core.areas import assert_ward_visible
 from ..core.auth import COORDINATORS, STAFF, CurrentUser, get_current_user, require_roles
 from ..core.errors import AppError
 from ..ml.features import FEATURE_LABELS, FEATURES
@@ -31,6 +32,8 @@ def me(user: CurrentUser = Depends(get_current_user)):
 def ward_weather(ward_id: str, refresh: bool = False, user: CurrentUser = Depends(get_current_user)):
     with db.tx() as conn:
         w = db.fetch_one(conn, "select id, name, lat, lng from wards where id = %s", (ward_id,))
+        if w:
+            assert_ward_visible(conn, user, ward_id)          # North / South staff: own area only
     if not w:
         raise AppError(404, "NOT_FOUND", "Unknown ward")
     data = get_weather_client().get(w["id"], w["lat"], w["lng"], force_live=refresh and user.role != "citizen")

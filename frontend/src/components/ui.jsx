@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom'
 import { useEffect, useId, useRef, useState } from 'react'
 import { animate, motion, useInView } from 'framer-motion'
 import { ChevronDown, ChevronUp, ChevronsUpDown, Loader2, X } from 'lucide-react'
@@ -141,12 +142,12 @@ export function Field({ label, error, hint, required, children, className = '' }
   )
 }
 
-const inputCls = 'block w-full rounded-lg border-0 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 placeholder:text-slate-400 focus:ring-2 focus:ring-brand-600 aria-[invalid=true]:ring-rose-500 disabled:bg-slate-50'
+const inputCls = 'block w-full rounded-lg border-0 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-600 aria-[invalid=true]:ring-rose-500 disabled:bg-slate-50'
 export const Input = (p) => <input {...p} className={`${inputCls} ${p.className || ''}`} />
 export const Textarea = (p) => <textarea {...p} className={`${inputCls} ${p.className || ''}`} />
 export const Select = ({ children, ...p }) => <select {...p} className={`${inputCls} pr-8 ${p.className || ''}`}>{children}</select>
 
-export function Modal({ open, onClose, title, children, footer, wide }) {
+export function Modal({ open, onClose, title, children, footer, wide, plain }) {
   const ref = useRef()
   useEffect(() => {
     if (!open) return
@@ -157,19 +158,20 @@ export function Modal({ open, onClose, title, children, footer, wide }) {
     return () => { document.removeEventListener('keydown', onKey); prev?.focus?.() }
   }, [open, onClose])
   if (!open) return null
-  return (
-    <div className="fixed inset-0 z-[900] flex items-end justify-center bg-slate-900/50 p-0 sm:items-center sm:p-4" onMouseDown={(e) => e.target === e.currentTarget && onClose?.()}>
+  // portal to <body>: an ancestor with transform/backdrop-filter (e.g. Card) would otherwise trap the fixed overlay
+  return createPortal(
+    <div className={`fixed inset-0 z-[900] flex items-end justify-center ${plain ? 'bg-transparent' : 'bg-slate-900/50'} p-0 sm:items-center sm:p-4`} onMouseDown={(e) => e.target === e.currentTarget && onClose?.()}>
       <div ref={ref} role="dialog" aria-modal="true" aria-label={title}
-        className={`max-h-[92vh] w-full overflow-y-auto rounded-t-2xl bg-white shadow-xl sm:rounded-2xl ${wide ? 'sm:max-w-3xl' : 'sm:max-w-lg'}`}>
-        <div className="sticky top-0 flex items-center justify-between border-b border-slate-100 bg-white px-5 py-3">
-          <h2 className="font-semibold text-slate-900">{title}</h2>
-          <button onClick={onClose} className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700" aria-label="Close dialog"><X className="h-5 w-5" /></button>
+        className={`max-h-[92vh] w-full overflow-y-auto rounded-t-3xl sm:rounded-3xl ${plain ? 'bg-brand-900 text-slate-100' : 'bg-white'} ${plain ? 'shadow-2xl ring-1 ring-brand-400/40' : 'shadow-xl'} ${wide ? 'sm:max-w-3xl' : 'sm:max-w-lg'}`}>
+        <div className={`sticky top-0 flex items-center justify-between px-5 py-3 ${plain ? 'bg-gradient-to-r from-brand-700 to-brand-500 text-white py-6' : 'border-b border-slate-100 bg-white'}`}>
+          <h2 className={`font-semibold ${plain ? 'text-white' : 'text-slate-900'}`}>{title}</h2>
+          <button onClick={onClose} className={`rounded p-1 ${plain ? 'text-white/80 hover:bg-white/20 hover:text-white' : 'text-slate-400 hover:bg-slate-100 hover:text-slate-700'}`} aria-label="Close dialog"><X className="h-5 w-5" /></button>
         </div>
-        <div className="p-5">{children}</div>
-        {footer && <div className="flex flex-wrap justify-end gap-2 border-t border-slate-100 px-5 py-3">{footer}</div>}
+        <div className={plain ? "px-6 py-10" : "p-5"}>{children}</div>
+        {footer && <div className={`flex flex-wrap justify-end gap-2 border-t px-5 ${plain ? 'border-white/10 bg-brand-800 py-5' : 'border-slate-100 py-3'}`}>{footer}</div>}
       </div>
     </div>
-  )
+  , document.body)
 }
 
 export function Spinner({ label = 'Loading…' }) {

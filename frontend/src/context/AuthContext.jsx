@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../lib/api'
-import { canManageArea as canManageAreaFor } from '../lib/areas'
+import { AREA_BOUND_ROLES, canManageArea as canManageAreaFor } from '../lib/areas'
 import { normalizeBdPhone } from '../lib/identity'
 import { supabase } from '../lib/supabase'
 
@@ -174,8 +174,9 @@ export function AuthProvider({ children }) {
       role: profile?.role,
       hasRole: (...roles) => Boolean(profile && roles.includes(profile.role)),
       isStaff: Boolean(profile && profile.role !== 'citizen'),
-      // Drainage Officer area (Dhaka North / South) from their authority; admins are city-wide
-      area: profile?.role === 'city_officer' ? (org?.city_corporation || null) : null,
+      // Dhaka North / South of Water Resilience Officers and city-corporation field crews (from their
+      // organisation); NGO staff, admins and citizens are city-wide (null)
+      area: AREA_BOUND_ROLES.includes(profile?.role) ? (org?.city_corporation || null) : null,
       canManageArea: (wardArea) => canManageAreaFor(profile?.role, org?.city_corporation, wardArea),
       refreshProfile: refresh,
       signOut,

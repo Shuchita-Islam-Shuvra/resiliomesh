@@ -25,7 +25,7 @@ Every monsoon, Dhaka's low-lying wards (Shantinagar, Malibagh, Mugda, Jatrabari,
 2. **Fragmented coordination.** City drainage teams, NGOs and citizens report through phone calls and social media. Reports get duplicated, and some get lost.
 3. **Resource misallocation.** A few dewatering pumps, crews and relief kits go to whoever calls loudest instead of to the highest-risk places, and two NGOs sometimes serve the same family twice.
 
-**Users:** citizens, city drainage officers, NGO coordinators, field workers and system administrators.
+**Users:** citizens, city water resilience officers, NGO coordinators, field workers and system administrators.
 
 ## 2. Solution: three connected modules
 

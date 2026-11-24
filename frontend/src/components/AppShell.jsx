@@ -54,7 +54,7 @@ function Clock() {
 }
 
 export default function AppShell() {
-  const { profile, org, area, signOut } = useAuth()
+  const { profile, area, signOut } = useAuth()
   const online = useOnline()
   const toast = useToast()
   const [open, setOpen] = useState(false)
@@ -145,29 +145,13 @@ export default function AppShell() {
           </div>
         ))}
       </div>
-      <div className={`border-t border-slate-200 ${mini ? 'flex flex-col items-center gap-2 py-4' : 'p-4'}`}>
-        {mini ? (
-          <>
-            <div title={profile?.full_name} className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-brand-500 to-brand-700 text-sm font-bold text-white">{initials}</div>
-            <button onClick={async () => { await signOut(); nav('/') }} aria-label="Sign out" title="Sign out"
-              className="rounded-md p-2 text-slate-500 transition hover:bg-rose-50 hover:text-rose-600"><LogOut className="h-4 w-4" /></button>
-          </>
-        ) : (
-          <>
-            <div className="flex items-center gap-3">
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-brand-500 to-brand-700 text-sm font-bold text-white">{initials}</div>
-              <div className="min-w-0">
-                <p className="truncate text-sm font-semibold text-slate-900">{profile?.full_name}</p>
-                <span className={`mt-0.5 inline-block rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ring-inset ${ROLE_TONE[profile?.role]}`}>{ROLE_LABEL[profile?.role]}{profile?.role === 'city_officer' && ` · ${areaLabel(area)}`}</span>
-              </div>
-            </div>
-            {org && <p className="mt-2 truncate text-xs text-slate-500">{org.name}</p>}
-            <button onClick={async () => { await signOut(); nav('/') }}
-              className="mt-2 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-sm font-medium text-slate-600 transition hover:bg-rose-50 hover:text-rose-600">
-              <LogOut className="h-4 w-4" aria-hidden /> Sign out
-            </button>
-          </>
-        )}
+      <div className="border-t border-slate-200 py-2">
+        <button onClick={async () => { await signOut(); nav('/') }} title={mini ? 'Sign out' : undefined} aria-label={mini ? 'Sign out' : undefined}
+          className={`group relative flex w-full items-center gap-3.5 overflow-hidden py-3 text-[15px] font-medium text-slate-700 outline-offset-[-2px] transition-colors duration-200 delay-100 hover:text-white hover:delay-[60ms] focus-visible:text-white ${mini ? 'justify-center px-0' : 'px-6'}`}>
+          <span aria-hidden className="nav-fill nav-fill-danger" />
+          <LogOut className="relative h-5 w-5 shrink-0 text-slate-500 transition-[color,transform] duration-200 delay-100 group-hover:translate-x-0.5 group-hover:text-white group-hover:delay-[40ms] group-focus-visible:text-white" aria-hidden />
+          {!mini && <span className="relative truncate">Sign out</span>}
+        </button>
       </div>
     </nav>
   )
@@ -201,6 +185,13 @@ export default function AppShell() {
             <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${online ? 'bg-red-50 text-red-700 ring-red-200' : 'bg-amber-100 text-amber-800 ring-amber-200'}`} role="status">
               {online ? <><span className="relative h-2 w-2 rounded-full bg-red-500 text-red-500 live-dot" /><Wifi className="h-3.5 w-3.5" aria-hidden />Live</> : <><WifiOff className="h-3.5 w-3.5" aria-hidden />Offline</>}
             </span>
+            <div className="flex items-center gap-3 border-l border-slate-200 pl-3">
+              <div className="hidden min-w-0 text-center sm:block">
+                <p className="translate-y-[3px] truncate text-base font-bold leading-tight tracking-tight text-slate-900">{profile?.full_name}</p>
+                <span className={`mt-1.5 inline-block whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-semibold leading-none ring-1 ring-inset ${ROLE_TONE[profile?.role] || ''}`}>{ROLE_LABEL[profile?.role]}{(profile?.role === 'city_officer' || area) && ` · ${areaLabel(area)}`}</span>
+              </div>
+              <div aria-hidden className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-brand-500 to-brand-700 text-sm font-bold text-white">{initials}</div>
+            </div>
           </div>
         </header>
         <main id={mainId} className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">

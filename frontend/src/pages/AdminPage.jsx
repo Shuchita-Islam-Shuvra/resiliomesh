@@ -266,7 +266,7 @@ function RequestsTab() {
         <Select aria-label="Filter by status" className="max-w-[180px]" value={status} onChange={(e) => setStatus(e.target.value)}>
           <option value="pending">Pending</option><option value="approved">Approved</option><option value="rejected">Rejected</option>
         </Select>
-        <p className="text-xs text-slate-500">Every request is checked live against the staff roster, official e-mail domains and the NGOAB registry. Drainage Officer / Admin grants and anything with a red flag need two different admins.</p>
+        <p className="text-xs text-slate-500">Every request is checked live against the staff roster, official e-mail domains and the NGOAB registry. Water Resilience Officer / Admin grants and anything with a red flag need two different admins.</p>
       </div>
       {err && <div className="px-4 pb-4"><Alert tone="error">{err}</Alert></div>}
       {!rows ? <Spinner /> : rows.length === 0 ? (!err && <EmptyState icon={UserCheck} title={`No ${status} requests`}>New staff sign-ups and admin proposals will appear here.</EmptyState>) : (
@@ -305,6 +305,9 @@ function RequestsTab() {
                           {[['roster', v.roster], ['email_domain', v.email_domain], ['ngoab', v.ngoab]].map(([g, k]) => label(g, k) && <Badge key={g} tone={label(g, k)[0]}>{label(g, k)[1]}</Badge>)}
                           <Badge tone={v.email_confirmed ? 'ok' : 'bad'}>{v.email_confirmed ? 'E-mail confirmed' : 'E-mail not confirmed'}</Badge>
                           <Badge tone={v.phone_verified ? 'ok' : 'warn'}>{v.phone_verified ? 'Phone verified (SMS)' : 'Phone not verified'}</Badge>
+                          {v.ngo_seat && <Badge tone="bad">Already holds a post</Badge>}
+                          {v.ngo_seat && <p className="text-xs text-rose-700">{v.ngo_seat.charAt(0).toUpperCase() + v.ngo_seat.slice(1)}.</p>}
+                          {v.ngo_transfer_from && <Badge tone="warn">Transfer from {v.ngo_transfer_from}</Badge>}
                           {status === 'pending' && blockers.length > 0 && (
                             <p className="mt-1 text-xs font-medium text-rose-700">Cannot approve yet: {blockers.map((b) => BLOCKER_LABEL[b] || b).join('; ')}</p>
                           )}
@@ -384,7 +387,7 @@ function VerificationTab() {
           <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
             {[
               ['SMS-verified phone required for citizen reports', settings.require_phone_verification ? 'On' : 'Off — needs an SMS provider in Supabase'],
-              ['Official e-mail domain for Drainage Officers / NGOs', settings.require_official_email ? 'On' : 'Off'],
+              ['Official e-mail domain for Water Resilience Officers / NGOs', settings.require_official_email ? 'On' : 'Off'],
               ['Confirmed e-mail required before approval', settings.require_email_confirmed ? 'On' : 'Off'],
               ['ID card / appointment letter required', settings.require_documents ? 'On' : 'Off'],
               ['Two admins always required for', (settings.two_person_roles || []).map((r) => ROLE_LABEL[r]).join(', ') || '—'],
@@ -416,7 +419,7 @@ function OrgDomains() {
     if (error) toast.error(errorMessage(error)); else { toast.success(`${o.name} saved`); load() }
   }
   return (
-    <Card title="Official e-mail domains" icon={Globe} subtitle="Drainage Officers must sign up with one of their authority's domains (e.g. dncc.gov.bd); NGO staff with their NGO's domain. Public mail providers are refused." bodyClass="p-0">
+    <Card title="Official e-mail domains" icon={Globe} subtitle="Water Resilience Officers must sign up with one of their authority's domains (e.g. dncc.gov.bd); NGO staff with their NGO's domain. Public mail providers are refused." bodyClass="p-0">
       {!orgs ? <Spinner /> : (
         <div className="overflow-x-auto">
           <table className="min-w-full text-sm">

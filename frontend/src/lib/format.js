@@ -1,6 +1,6 @@
 export const ROLE_LABEL = {
   citizen: 'Citizen',
-  city_officer: 'Drainage Officer',
+  city_officer: 'Water Resilience Officer',
   ngo_coordinator: 'NGO Coordinator',
   field_worker: 'Field Worker',
   admin: 'System Admin',

@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import asdict
 
 from ..core import db
-from ..core.areas import assert_wards_in_area
+from ..core.areas import assert_wards_in_area, officer_area
 from ..core.auth import CurrentUser
 from ..core.errors import AppError
 from .optimizer import Constraints, IncidentDemand, ResourcePool, derive_demand, optimize
@@ -25,9 +25,15 @@ def create_plan(incident_ids: list[str], constraints: Constraints, user: Current
                    risk_score, risk_level::text, priority, lat, lng, ward_id
             from incidents where id = any(%s::uuid[])""", (incident_ids,))
         assert_wards_in_area(conn, user, [i["ward_id"] for i in incs])
+        # Officers plan only with resources they can see (migration 011): their own
+        # authority's stock, or stock based in their area. Others use the whole city.
+        area = officer_area(conn, user)
         pools = db.fetch_all(conn, """
-            select id::text, resource_type::text, quantity_available, lat, lng, organization_id::text, name
-            from resources where quantity_available > 0""")
+            select r.id::text, r.resource_type::text, r.quantity_available, r.lat, r.lng, r.organization_id::text, r.name
+            from resources r left join wards w on w.id = r.base_ward_id
+            where r.quantity_available > 0
+              and (%(area)s::text is null or r.organization_id = %(org)s::uuid or w.city_corporation = %(area)s)""",
+            {"area": area, "org": user.organization_id})
 
     found = {i["id"] for i in incs}
     missing = [i for i in incident_ids if i not in found]

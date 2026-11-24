@@ -1,4 +1,4 @@
-"""Drainage Officer areas: Dhaka North (DNCC) and Dhaka South (DSCC).
+"""Water Resilience Officer areas: Dhaka North (DNCC) and Dhaka South (DSCC).
 
 Mirrors rm_can_manage_ward() from migration 009 for the endpoints that write with
 the trusted backend connection (where RLS does not apply). An officer's area is
@@ -37,6 +37,34 @@ def officer_area(conn: Connection, user: CurrentUser) -> str | None:
         raise AppError(403, "FORBIDDEN",
                        "FORBIDDEN: your authority has no area (Dhaka North / Dhaka South) set. Ask an admin.")
     return row["area"]
+
+
+def view_area(conn: Connection, user: CurrentUser) -> str | None:
+    """Area a user may SEE (mirrors rm_view_area() of migration 012), None = city-wide.
+
+    Water Resilience Officers are always bound (no area = see nothing); field workers of a
+    city corporation see their area; NGO crews, coordinators, admins, citizens: None.
+    """
+    if user.role == "city_officer":
+        try:
+            return officer_area(conn, user)
+        except AppError:
+            return "-"
+    if user.role == "field_worker" and user.organization_id:
+        row = db.fetch_one(conn, "select to_jsonb(o)->>'city_corporation' as area from organizations o where o.id = %s",
+                           (user.organization_id,))
+        return (row or {}).get("area") or None
+    return None
+
+
+def assert_ward_visible(conn: Connection, user: CurrentUser, ward_id: str) -> None:
+    area = view_area(conn, user)
+    if area is None:
+        return
+    row = db.fetch_one(conn, "select city_corporation from wards where id = %s", (ward_id,))
+    if row and row["city_corporation"] != area:
+        raise AppError(403, "FORBIDDEN",
+                       f"FORBIDDEN: this ward is in {area_label(row['city_corporation'])}, outside your area ({area_label(area)})")
 
 
 def assert_wards_in_area(conn: Connection, user: CurrentUser, ward_ids: Iterable[str]) -> None:

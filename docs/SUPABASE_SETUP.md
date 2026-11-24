@@ -16,14 +16,17 @@ Run these files **one at a time, in this order**. Paste the content and click **
 | 4 | `supabase/migrations/004_rpc.sql` | atomic reservation, plan approval, task updates, workflow queue, analytics |
 | 5 | `supabase/migrations/005_realtime.sql` | adds tables to the `supabase_realtime` publication |
 | 6 | `supabase/seed.sql` | 20 Dhaka wards, 25 drainage assets, 5 organisations, inventory, ~23k historical events |
-| 7 | `supabase/migrations/006_role_requests.sql` | staff access requests (sign-up as Drainage Officer / NGO / Field Worker) |
+| 7 | `supabase/migrations/006_role_requests.sql` | staff access requests (sign-up as Water Resilience Officer / NGO / Field Worker) |
 | 8 | `supabase/migrations/007_staff_login_ids.sql` | Employee / Staff / Admin sign-in IDs |
 | 9 | `supabase/migrations/008_identity_verification.sql` | server-side staff-ID check bound to the session, MFA, official e-mail domains, staff roster, NGOAB registry, ID-card upload bucket, two-admin approval, Bangladesh-only phones, report area / rate limits / trust flags. See [IDENTITY_VERIFICATION.md](IDENTITY_VERIFICATION.md) |
-| 10 | `supabase/migrations/009_officer_areas.sql` | Drainage Officer areas: each drainage authority serves Dhaka North (DNCC) or Dhaka South (DSCC). Officers can view all of Dhaka but can only verify, assess, plan, resolve and edit assets in their own area. Admins stay city-wide. |
+| 10 | `supabase/migrations/009_officer_areas.sql` | Water Resilience Officer areas: each drainage authority serves Dhaka North (DNCC) or Dhaka South (DSCC). Officers can only verify, assess, plan, resolve and edit assets in their own area. Admins stay city-wide. |
+| 11 | `supabase/migrations/010_one_ngo_per_coordinator.sql` | One person, one NGO Coordinator post. NGO Coordinators work city-wide (no North/South split). A mobile number that holds an active NGO Coordinator post cannot be used by any other active staff account, and moving a coordinator to another NGO is a two-admin transfer. |
+| 12 | `supabase/migrations/011_officer_area_view.sql` | Officers SEE only their own area too: a Dhaka South officer's wards, reports, assets, risk, plans, tasks, workflows, analytics and map are all Dhaka South (their own reports and their authority's own stock stay visible). Admins, NGOs and field workers unchanged. |
+| 13 | `supabase/migrations/012_area_bound_staff.sql` | North / South everywhere: field workers of a city corporation are bound to its area like officers (NGO crews stay city-wide). Area-bound staff see only their area (incl. ward weather) and can file reports / log needs only there; a place belongs to the area of its nearest ward centre. Field tasks go only to crews of the incident's area or NGO crews. Adds public `ward_areas()` for map shading. |
 
-Shortcut: run `001_schema.sql`, then `supabase/run_after_001.sql` (files 2–10 in one script).
+Shortcut: run `001_schema.sql`, then `supabase/run_after_001.sql` (files 2–13 in one script).
 
-All files can be re-run safely (they are idempotent). If you ever re-run `003_rls.sql`, run 006–009 again afterwards (003 resets every policy). If you re-run `004_rpc.sql`, run 009 again.
+All files can be re-run safely (they are idempotent). If you ever re-run `003_rls.sql`, run 006–012 again afterwards (003 resets every policy). If you re-run `004_rpc.sql`, run 009, 011 and 012 again. If you re-run `008`, run 010 again.
 
 Check that it worked:
 ```sql
@@ -90,14 +93,14 @@ This creates 10 accounts and assigns their roles and organisations:
 |---|---|
 | admin@resiliomesh.demo · ADM-001 | System Admin |
 | admin2@resiliomesh.demo · ADM-002 | System Admin: the second approver for the two-admin rule |
-| officer@resiliomesh.demo / officer2@… | Drainage Officer (Dhaka South / Dhaka North) |
+| officer@resiliomesh.demo / officer2@… | Water Resilience Officer (Dhaka South / Dhaka North) |
 | ngo@resiliomesh.demo / ngo2@… | NGO Coordinator |
 | field1@ / field2@ / field3@resiliomesh.demo | Field Worker |
 | citizen@ / citizen2@resiliomesh.demo | Citizen |
 
 It also inserts 18 realistic incidents in different states and 6 community needs. One need is a deliberate duplicate, and the database flags it automatically.
 
-> Self-registration always creates a **Citizen**. Staff roles are granted only through **Admin → Access requests**. Drainage Officer and Admin grants, and any request that fails a check (not on the roster, wrong e-mail domain, unknown NGOAB number), need **two different admins**. The database enforces all of this.
+> Self-registration always creates a **Citizen**. Staff roles are granted only through **Admin → Access requests**. Water Resilience Officer and Admin grants, and any request that fails a check (not on the roster, wrong e-mail domain, unknown NGOAB number), need **two different admins**. The database enforces all of this.
 
 ## 6b. Verification data (Admin → Verification data)
 * **Official e-mail domains** per city authority / NGO. Seeded: North → `dncc.gov.bd`, South → `dscc.gov.bd`.

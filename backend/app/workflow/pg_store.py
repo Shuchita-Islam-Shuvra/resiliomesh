@@ -84,15 +84,20 @@ class _Ops:
 
     # tasks ----------------------------------------------------------------
     def pick_field_worker(self, incident_id):
+        # North / South: a city-corporation crew only works in its own area; NGO crews anywhere
         row = self.c.execute(
             """select p.id::text from profiles p
+               left join organizations o on o.id = p.organization_id
                left join tasks t on t.assigned_to = p.id and t.status in ('assigned','accepted','in_progress')
                where p.role = 'field_worker' and p.is_active
+                 and coalesce(to_jsonb(o)->>'city_corporation',
+                              (select w.city_corporation from incidents i join wards w on w.id = i.ward_id where i.id = %s))
+                     = (select w.city_corporation from incidents i join wards w on w.id = i.ward_id where i.id = %s)
                group by p.id
                order by count(t.id) asc,
                         bool_or(p.ward_id = (select ward_id from incidents where id = %s)) desc nulls last,
                         p.created_at
-               limit 1""", (incident_id,)).fetchone()
+               limit 1""", (incident_id, incident_id, incident_id)).fetchone()
         return row["id"] if row else None
 
     def create_task(self, **t):

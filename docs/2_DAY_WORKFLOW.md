@@ -91,7 +91,7 @@ Ei files porbe ar nijer bhashay notes likhbe:
 |---|---|
 | Project title | ResilioMesh |
 | Track | World Problem Solver |
-| Problem statement | Dhaka-r urban waterlogging: limited prediction, fragmented coordination, misallocated pumps/crews/relief. Users: citizens, city drainage officers, NGO coordinators, field workers. |
+| Problem statement | Dhaka-r urban waterlogging: limited prediction, fragmented coordination, misallocated pumps/crews/relief. Users: citizens, city water resilience officers, NGO coordinators, field workers. |
 | Advanced challenges | **A02, A05** |
 | Links | YouTube · GitHub · Live |
 

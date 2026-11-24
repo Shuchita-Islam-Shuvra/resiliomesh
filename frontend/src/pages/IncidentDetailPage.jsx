@@ -32,7 +32,7 @@ export default function IncidentDetailPage() {
   const [nearby, setNearby] = useState([])
   const peers = usePresence(`incident:${id}`, profile)
   const wardArea = inc?.wards?.city_corporation
-  // Drainage Officers act only in their own area (Dhaka North / South); admins everywhere
+  // Water Resilience Officers act only in their own area (Dhaka North / South); admins everywhere
   const officer = hasRole('city_officer', 'admin') && canManageArea(wardArea)
   const outsideArea = hasRole('city_officer') && inc && !officer
 
@@ -144,7 +144,7 @@ export default function IncidentDetailPage() {
               <div><dt className="text-xs text-slate-500">Priority</dt><dd className="font-medium">{inc.priority ?? '—'}</dd></div>
               {inc.drainage_assets && <div className="col-span-2"><dt className="text-xs text-slate-500">Linked asset</dt><dd className="font-medium">{inc.drainage_assets.name} ({inc.drainage_assets.status}, condition {inc.drainage_assets.condition_score})</dd></div>}
             </dl>
-            <div className="mt-4"><MapView height="h-64" incidents={[inc]} showWardRadius={false} flyTo={[inc.lat, inc.lng]} /></div>
+            <div className="mt-4"><MapView height="h-64" incidents={[inc]} showWardRadius={false} flyTo={[inc.lat, inc.lng]} lockToArea={!outsideArea} /></div>
           </Card>
 
           {isStaff && assessment && <ExplainCard a={assessment} />}

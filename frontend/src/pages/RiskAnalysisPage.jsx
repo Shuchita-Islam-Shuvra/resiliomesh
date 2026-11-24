@@ -15,6 +15,13 @@ const GROUPS = [
   { title: 'Drainage & terrain', items: [['drainage_capacity_mm_hr', 10, 50, 1, 'mm/h'], ['impervious_pct', 50, 100, 1, '%'], ['elevation_m', 3, 9, 0.1, 'm'], ['asset_condition', 0, 100, 1, '/100'], ['blocked_assets', 0, 8, 1, '']] },
   { title: 'History & signals', items: [['historical_events_10y', 0, 60, 1, ''], ['recent_reports_6h', 0, 10, 1, '']] },
 ]
+// Feature-importance bars are coloured by the kind of factor (validated categorical palette)
+const FACTOR_GROUPS = [
+  { key: 'weather', label: 'Weather & season', color: '#2a78d6', features: ['rain_past_24h_mm', 'rain_next_24h_mm', 'max_hourly_mm', 'monsoon'] },
+  { key: 'drainage', label: 'Drainage & terrain', color: '#eb6834', features: ['drainage_capacity_mm_hr', 'impervious_pct', 'elevation_m', 'asset_condition', 'blocked_assets'] },
+  { key: 'history', label: 'History & signals', color: '#1baf7a', features: ['historical_events_10y', 'recent_reports_6h'] },
+]
+const groupOf = (feature) => FACTOR_GROUPS.find((g) => g.features.includes(feature)) || { label: 'Other', color: '#64748b' }
 const PRESETS = {
   'Dry day': { rain_past_24h_mm: 0, rain_next_24h_mm: 0, max_hourly_mm: 0, depth: 0 },
   'Normal monsoon': { rain_past_24h_mm: 35, rain_next_24h_mm: 45, max_hourly_mm: 14, depth: 15 },
@@ -43,7 +50,7 @@ function Gauge({ score, level }) {
 
 export default function RiskAnalysisPage() {
   const { hasRole, area } = useAuth()
-  // Drainage Officers re-score only their own area (Dhaka North / South)
+  // Water Resilience Officers re-score only their own area (Dhaka North / South)
   const rescoreLabel = `Re-score ${area ? `${areaLabel(area)} wards` : 'all wards'} with live weather`
   const toast = useToast()
   const [model, setModel] = useState(null)
@@ -99,16 +106,21 @@ export default function RiskAnalysisPage() {
                 <p className="col-span-2 text-xs leading-relaxed text-slate-500">Hard rules (e.g. ≥ 45 cm standing water is always HIGH) are applied after the model, so a statistical estimate can never under-warn in a clearly dangerous situation.</p>
               </dl>
               <div className="min-w-0">
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Global feature importance (gain)</p>
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Global feature importance (gain)</p>
+                  <ul className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-600" aria-label="Factor groups">
+                    {FACTOR_GROUPS.map((g) => <li key={g.key} className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm" style={{ background: g.color }} aria-hidden />{g.label}</li>)}
+                  </ul>
+                </div>
                 <div className="h-72 w-full min-w-0">
                   <ResponsiveContainer>
                     <BarChart data={model.importance} layout="vertical" margin={{ left: 0, right: 24, top: 0, bottom: 0 }}>
                       <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
                       <XAxis type="number" unit="%" tick={{ fontSize: 11, fill: '#64748b' }} tickLine={false} axisLine={false} />
                       <YAxis type="category" dataKey="label" width={170} tick={{ fontSize: 11, fill: '#475569' }} tickLine={false} axisLine={false} />
-                      <Tooltip cursor={{ fill: '#f1f5f9' }} formatter={(v) => [`${v}%`, 'Importance']} />
+                      <Tooltip cursor={{ fill: '#f1f5f9' }} formatter={(v, _n, item) => [`${v}%`, `Importance · ${groupOf(item?.payload?.feature).label}`]} />
                       <Bar dataKey="gain_pct" radius={[0, 6, 6, 0]} barSize={14} animationDuration={900}>
-                        {model.importance.map((x, i) => <Cell key={x.feature} fill={i < 3 ? '#0f766e' : i < 6 ? '#14b8a6' : '#99f6e4'} />)}
+                        {model.importance.map((x) => <Cell key={x.feature} fill={groupOf(x.feature).color} />)}
                       </Bar>
                     </BarChart>
                   </ResponsiveContainer>

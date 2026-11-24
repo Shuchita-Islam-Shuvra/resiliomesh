@@ -10,9 +10,9 @@ import { ROLE_BY_KEY } from '../lib/roles'
 export const DEMO_PROFILES = [
   { key: 'citizen', name: 'Arif Chowdhury', role: 'citizen', place: 'Dhaka South', does: 'Report waterlogging with GPS and depth, then follow it to resolution.' },
   { key: 'officer_south', name: 'Tanvir Hasan', role: 'city_officer', place: 'Dhaka South', does: 'Verify reports, run AI risk scoring and approve pump & crew plans in Dhaka South.' },
-  { key: 'officer_north', name: 'Nusrat Jahan', role: 'city_officer', place: 'Dhaka North', does: 'Same tools for Dhaka North. Open a South report to see area isolation.' },
+  { key: 'officer_north', name: 'Nusrat Jahan', role: 'city_officer', place: 'Dhaka North', does: 'Same tools for Dhaka North. Sees only Dhaka North: no South report, ward or map area.' },
   { key: 'ngo', name: 'Sabrina Akter', role: 'ngo_coordinator', place: 'Shobar Jonno Relief Network', does: 'Log community needs, manage relief stock and allocate the last kits.' },
-  { key: 'field', name: 'Rafiqul Islam', role: 'field_worker', place: 'Dhaka South', does: 'Receive field tasks on the phone and update them offline.' },
+  { key: 'field', name: 'Rafiqul Islam', role: 'field_worker', place: 'Dhaka South', does: 'Receive Dhaka South field tasks on the phone and update them offline.' },
   { key: 'admin', name: 'Farhana Rahman', role: 'admin', place: 'Platform operations', does: 'Approve staff access, read the audit log, check system health.' },
   { key: 'admin2', name: 'Kamal Hossain', role: 'admin', place: 'Second approver', does: 'Second admin for two-person approval of officer and admin access.' },
 ]

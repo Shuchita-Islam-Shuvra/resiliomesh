@@ -9,7 +9,7 @@ cd backend && .venv\Scripts\python -m pytest -v
 # Backend real-database tests, 21 tests
 #  a) against a throwaway local PostGIS (Docker):
 docker run -d --name rm-pg -e POSTGRES_PASSWORD=testpw -p 54329:5432 postgis/postgis:16-3.4
-for f in scripts/test_db/supabase_stub.sql supabase/migrations/00*.sql supabase/seed.sql; do
+for f in scripts/test_db/supabase_stub.sql supabase/migrations/00[1-5]_*.sql supabase/seed.sql supabase/migrations/00[6-9]_*.sql supabase/migrations/01[0-9]_*.sql; do
   docker exec -i rm-pg psql -U postgres -v ON_ERROR_STOP=1 -q < $f; done
 TEST_DATABASE_URL=postgresql://postgres:testpw@localhost:54329/postgres pytest tests/test_db_*.py -v
 #  b) or against a Supabase *staging* project (tests create and clean their own rows)

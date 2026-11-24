@@ -75,7 +75,7 @@ Alternatives: Railway or Fly.io using `backend/Dockerfile` (build context = repo
 3. Copy the Vercel URL into Supabase Auth URL settings and into Render `CORS_ORIGINS`.
 
 ### Judge demo sign-in (one click per profile)
-Under the normal sign-in form, a **Demo accounts for judges** box lists seven demo people (citizen, two Drainage Officers for
+Under the normal sign-in form, a **Demo accounts for judges** box lists seven demo people (citizen, two Water Resilience Officers for
 Dhaka South / North, NGO coordinator, field worker, two admins). A judge clicks one and is signed in, no password (a
 **judge access code** is asked once only if `DEMO_ACCESS_CODE` is set). This follows the rulebook (S03 "provide test access privately", checklist 05
 "no credentials in public files"):

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { AlertTriangle, CheckCircle2, Circle, Loader2, RotateCcw, Undo2, Workflow, XCircle } from 'lucide-react'
 import { Alert, Button, Card, EmptyState, PageHeader, Select, Spinner, StatusBadge, Tabs, Th } from '../components/ui'
 import { useAuth } from '../context/AuthContext'
@@ -67,7 +68,10 @@ function Runs() {
         {worker ? <>Worker online · processed {worker.processed} run(s) · last poll {worker.last_poll ? timeAgo(worker.last_poll * 1000) : '—'}</> : 'Worker status unavailable (backend asleep?). Use "Process queue now".'}
         <Button size="sm" variant="secondary" className="ml-3" loading={busy === 'now'} onClick={processNow}>Process queue now</Button>
       </Alert>
-      {runs.length === 0 ? <Card><EmptyState icon={Workflow} title="No workflow runs yet">Approve an allocation plan to start one.</EmptyState></Card> : runs.map((r) => (
+      {runs.length === 0 ? <Card><EmptyState icon={Workflow} title="No workflow runs yet">
+          <p>A run starts when an allocation plan is approved.</p>
+          <Link to="/resources?tab=plans" className="mt-3 inline-block"><Button size="sm">Go to Optimise &amp; approve</Button></Link>
+        </EmptyState></Card> : runs.map((r) => (
         <Card key={r.id} bodyClass="p-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>

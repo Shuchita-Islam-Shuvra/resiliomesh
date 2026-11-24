@@ -3,7 +3,7 @@
 -- ---------------------------------------------------------------------
 -- Dhaka has two city corporations: DNCC (Dhaka North) and DSCC (Dhaka South).
 -- Every ward already belongs to one of them (wards.city_corporation).
--- Until now a Drainage Officer (role key `city_officer`) could verify, assess,
+-- Until now a Water Resilience Officer (role key `city_officer`) could verify, assess,
 -- plan and resolve incidents anywhere in Dhaka. From this migration:
 --
 --   * organizations.city_corporation  = the area a drainage authority serves.

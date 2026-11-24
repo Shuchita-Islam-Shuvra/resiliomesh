@@ -1,4 +1,4 @@
--- ResilioMesh: 002 + 003 + 004 + 005 + seed + 006 + 007 + 008 + 009 in ONE file (run after 001_schema.sql)
+-- ResilioMesh: 002 + 003 + 004 + 005 + seed + 006 + 007 + 008 + 009 + 010 + 011 + 012 in ONE file (run after 001_schema.sql)
 
 -- ================= migrations/002_functions_triggers.sql =================
 -- =====================================================================
@@ -2703,7 +2703,7 @@ exception when others then null; end $$;
 -- ---------------------------------------------------------------------
 -- Dhaka has two city corporations: DNCC (Dhaka North) and DSCC (Dhaka South).
 -- Every ward already belongs to one of them (wards.city_corporation).
--- Until now a Drainage Officer (role key `city_officer`) could verify, assess,
+-- Until now a Water Resilience Officer (role key `city_officer`) could verify, assess,
 -- plan and resolve incidents anywhere in Dhaka. From this migration:
 --
 --   * organizations.city_corporation  = the area a drainage authority serves.
@@ -3048,3 +3048,703 @@ begin
 
   return jsonb_build_object('ok', true, 'task', to_jsonb(v_task));
 end $$;
+
+-- ================= migrations/010_one_ngo_per_coordinator.sql =================
+-- =====================================================================
+-- ResilioMesh — 010 one person, one NGO coordinator post
+-- ---------------------------------------------------------------------
+-- How areas and NGOs fit together:
+--   * Water Resilience Officers are bound to Dhaka North (DNCC) or Dhaka South (DSCC)
+--     through their authority (migration 009).
+--   * NGO Coordinators and Field Workers are NOT split by area. They serve the
+--     whole city, because relief follows the flood and not the corporation line.
+--
+-- This migration matches how NGOs normally staff their work: a coordinator is
+-- employed by ONE NGO. The same person must not hold coordinator posts at two
+-- NGOs, or two coordinator accounts at the same NGO.
+--
+--   * The person is identified by their Bangladeshi mobile number. SIMs are
+--     NID-registered in Bangladesh, and staff sign-up already requires one
+--     (an SMS code confirms it once an SMS provider is configured).
+--   * While one account holds an active NGO Coordinator post, no other active
+--     staff account may use the same mobile. That covers a second coordinator
+--     post, or the same person also working as a field worker or officer
+--     somewhere else.
+--   * An NGO Coordinator request needs a mobile number on the account.
+--   * Moving a coordinator to a different NGO is a TRANSFER (flag `ngo_transfer`).
+--     It needs two admins and a written reason. A profile holds exactly one
+--     organisation, so the old post ends when the new one starts.
+--   * A trigger on profiles enforces all of this, backed by a partial unique
+--     index. No path (approval, admin proposal, SQL editor, backend) can create
+--     a second post.
+--
+-- Run after 009. Re-runnable. If you re-run 008, run this file again
+-- (it replaces rm_request_checks from 008).
+-- =====================================================================
+
+-- ---------- 0. Earlier migrations must be in place ----------------------
+do $$
+declare missing text[] := '{}';
+begin
+  if to_regclass('public.security_settings')      is null then missing := missing || 'security_settings'::text; end if;
+  if to_regclass('public.staff_roster')           is null then missing := missing || 'staff_roster'::text; end if;
+  if to_regclass('public.ngo_registry')           is null then missing := missing || 'ngo_registry'::text; end if;
+  if to_regclass('public.role_request_documents') is null then missing := missing || 'role_request_documents'::text; end if;
+  if to_regprocedure('public.rm_is_freemail(text)') is null then missing := missing || 'rm_is_freemail()'::text; end if;
+  if cardinality(missing) > 0 then
+    raise exception 'Run 006_role_requests.sql, 007_staff_login_ids.sql and 008_identity_verification.sql first, then 009 and 010 (missing: %)',
+      array_to_string(missing, ', ');
+  end if;
+  if not exists (select 1 from information_schema.columns
+                  where table_schema = 'public' and table_name = 'organizations' and column_name = 'city_corporation') then
+    raise notice '009_officer_areas.sql has not been run yet: Dhaka North / South officer areas are not active. Run it too.';
+  end if;
+end $$;
+
+-- ---------- 1. Who else holds a post with this mobile? -------------------
+-- Returns a short description of the conflicting post, or null.
+-- VOLATILE on purpose: inside the trigger it must see rows committed by a
+-- concurrent transaction after the advisory lock below was granted.
+create or replace function public.rm_ngo_seat_conflict(p_user uuid, p_role app_role, p_phone text)
+returns text
+language plpgsql volatile security definer set search_path = public as $$
+declare v_role app_role; v_org text;
+begin
+  if p_phone is null or p_role is null or p_role not in ('ngo_coordinator','city_officer','field_worker') then
+    return null;
+  end if;
+  select x.role, coalesce(o.name, 'no organisation') into v_role, v_org
+    from profiles x left join organizations o on o.id = x.organization_id
+   where x.id is distinct from p_user
+     and x.is_active
+     and x.phone = p_phone
+     and x.role in ('ngo_coordinator','city_officer','field_worker')
+     and (p_role = 'ngo_coordinator' or x.role = 'ngo_coordinator')
+   order by (x.role = 'ngo_coordinator') desc, x.created_at
+   limit 1;
+  if v_role is null then return null; end if;
+  return format('this mobile number already belongs to the %s of %s on another account. One person can hold only one NGO Coordinator post',
+                case v_role when 'ngo_coordinator' then 'NGO Coordinator'
+                            when 'city_officer'    then 'Water Resilience Officer'
+                            else 'Field Worker' end,
+                v_org);
+end $$;
+revoke execute on function public.rm_ngo_seat_conflict(uuid, app_role, text) from anon, authenticated, public;
+
+-- ---------- 2. Hard guarantee on profiles --------------------------------
+create or replace function public.rm_ngo_seat_guard() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare v_msg text;
+begin
+  if not new.is_active or new.phone is null
+     or new.role not in ('ngo_coordinator','city_officer','field_worker') then
+    return new;
+  end if;
+  if tg_op = 'UPDATE' and new.role = old.role and new.phone is not distinct from old.phone
+     and new.is_active = old.is_active then
+    return new;
+  end if;
+  -- serialise concurrent grants for the same mobile
+  perform pg_advisory_xact_lock(hashtextextended('rm_staff_phone:' || new.phone, 0));
+  v_msg := rm_ngo_seat_conflict(new.id, new.role, new.phone);
+  if v_msg is not null then
+    if rm_is_system() or coalesce(rm_role()::text, '') = 'admin' then
+      raise exception 'CONFLICT: %', v_msg using errcode = '23505';
+    end if;
+    -- do not tell non-admins whose number it is
+    raise exception 'CONFLICT: this mobile number is already registered to another staff account' using errcode = '23505';
+  end if;
+  return new;
+end $$;
+
+-- named after trg_aa_profile_normalize (008) so the phone is already normalised
+drop trigger if exists trg_ngo_seat_guard on profiles;
+create trigger trg_ngo_seat_guard before insert or update of role, phone, is_active on profiles
+  for each row execute function rm_ngo_seat_guard();
+
+-- Backstop for two coordinator posts on one mobile. If old data already breaks
+-- the rule, list it and skip the index (the trigger still blocks new cases).
+do $$
+declare d record; n int := 0;
+begin
+  for d in
+    select phone, string_agg(coalesce(email, id::text), ', ') as accounts
+      from profiles where role = 'ngo_coordinator' and is_active and phone is not null
+     group by phone having count(*) > 1
+  loop
+    n := n + 1;
+    raise notice 'one mobile, several active NGO coordinators: % → %. Deactivate all but one.', d.phone, d.accounts;
+  end loop;
+  if n = 0 then
+    create unique index if not exists uq_profiles_active_ngo_coordinator_phone
+      on profiles(phone) where role = 'ngo_coordinator' and is_active and phone is not null;
+  else
+    raise notice 'uq_profiles_active_ngo_coordinator_phone not created: fix the % case(s) above and re-run 010', n;
+  end if;
+end $$;
+
+-- ---------- 3. Access-request checks (008 + NGO post rules) ---------------
+-- Same as 008 §6, plus:
+--   blocker `ngo_seat_taken` : the mobile already holds a conflicting post
+--   blocker `phone_missing`  : NGO Coordinator request without a mobile number
+--   flag    `ngo_transfer`   : an active NGO Coordinator asks to move to another NGO
+--   key     `ngo_seat`       : the conflict text, for the admin screen
+create or replace function public.rm_request_checks(r role_requests, p_org uuid default null, p_reviewer uuid default null)
+returns jsonb
+language plpgsql stable security definer set search_path = public as $$
+declare
+  s security_settings; p profiles; o organizations; v_org uuid := coalesce(p_org, r.organization_id);
+  v_email text; v_domain text; v_dstatus text; v_email_ok boolean := true; v_email_msg text;
+  v_roster text := 'n/a'; v_roster_by uuid; rr staff_roster;
+  v_ngo text := 'n/a'; v_reg text; ng ngo_registry; v_ngo_by uuid;
+  v_emp text; v_taken boolean := false; v_docs int; v_mail_ok boolean;
+  v_seat text; v_transfer_from text;
+  flags text[] := '{}'; blockers text[] := '{}'; v_required int; v_approvals jsonb;
+begin
+  select * into s from security_settings where id;
+  select * into p from profiles where id = r.user_id;
+  select * into o from organizations where id = v_org;
+  v_email   := lower(coalesce(p.email, r.email));
+  v_domain  := rm_email_domain(v_email);
+  v_mail_ok := p.email_verified_at is not null;
+
+  -- e-mail domain
+  if o.id is not null and cardinality(o.email_domains) > 0 and rm_domain_matches(v_domain, o.email_domains) then
+    v_dstatus := 'official';
+  elsif o.id is null and r.requested_role = 'city_officer' and exists (
+          select 1 from organizations x where x.type = 'city_authority' and rm_domain_matches(v_domain, x.email_domains)) then
+    v_dstatus := 'official';
+  elsif rm_is_freemail(v_domain) then v_dstatus := 'freemail';
+  else v_dstatus := 'unlisted';
+  end if;
+  if r.requested_role = 'city_officer' and v_dstatus <> 'official' then
+    v_email_ok := false; v_email_msg := 'City officers must use their city corporation e-mail address';
+  elsif r.requested_role = 'ngo_coordinator' and o.id is not null and cardinality(o.email_domains) > 0 and v_dstatus <> 'official' then
+    v_email_ok := false; v_email_msg := 'NGO coordinators must use their NGO''s e-mail domain';
+  elsif r.requested_role = 'ngo_coordinator' and v_dstatus = 'freemail' then
+    v_email_ok := false; v_email_msg := 'NGO coordinators must use an organisation e-mail, not a public mail provider';
+  end if;
+
+  -- staff roster
+  v_emp := nullif(upper(btrim(coalesce(r.employee_id, p.employee_id))), '');
+  if r.requested_role <> 'admin' then
+    if v_emp is not null then
+      select * into rr from staff_roster where organization_id = v_org and upper(employee_id) = v_emp;
+    else
+      select * into rr from staff_roster where organization_id = v_org and lower(official_email) = v_email;
+    end if;
+    if rr.id is null then
+      v_roster := case when v_emp is not null and exists (select 1 from staff_roster where upper(employee_id) = v_emp)
+                       then 'other_org' else 'not_found' end;
+    elsif not rr.is_active then v_roster := 'inactive';
+    elsif rr.role is not null and rr.role <> r.requested_role then v_roster := 'role_mismatch';
+    elsif rr.official_email is null then v_roster := 'id_only';
+    elsif lower(rr.official_email) = v_email then v_roster := 'verified';
+    else v_roster := 'email_mismatch';
+    end if;
+    v_roster_by := rr.uploaded_by;
+  end if;
+
+  -- NGOAB registration
+  if r.requested_role = 'ngo_coordinator' then
+    v_reg := nullif(upper(btrim(coalesce(r.registration_no, o.ngoab_registration_no))), '');
+    if v_reg is null then v_ngo := 'missing';
+    else
+      select * into ng from ngo_registry where registration_no = v_reg;
+      if ng.id is null then v_ngo := 'not_found';
+      elsif ng.status <> 'active' or (ng.valid_until is not null and ng.valid_until < current_date) then v_ngo := 'inactive';
+      else v_ngo := 'verified'; v_ngo_by := ng.imported_by;
+      end if;
+    end if;
+  end if;
+
+  if v_emp is not null then
+    v_taken := exists (select 1 from profiles x where upper(x.employee_id) = v_emp and x.id <> r.user_id);
+  end if;
+  select count(*) into v_docs from role_request_documents d where d.request_id = r.id;
+
+  -- one person, one NGO Coordinator post (010)
+  v_seat := rm_ngo_seat_conflict(r.user_id, r.requested_role, p.phone);
+  if r.requested_role = 'ngo_coordinator' and p.role = 'ngo_coordinator' and p.is_active
+     and p.organization_id is not null and p.organization_id is distinct from v_org then
+    select name into v_transfer_from from organizations where id = p.organization_id;
+  end if;
+
+  -- red flags: allowed only with two approvals and a written note
+  if v_dstatus <> 'official' and r.requested_role <> 'admin' then flags := array_append(flags, 'email_domain'); end if;
+  if v_roster not in ('verified','id_only','n/a') then flags := array_append(flags, 'roster'); end if;
+  if v_ngo not in ('verified','n/a') then flags := array_append(flags, 'ngoab'); end if;
+  if p_reviewer is not null and v_roster in ('verified','id_only') and v_roster_by = p_reviewer then
+    flags := array_append(flags, 'roster_uploaded_by_reviewer');
+  end if;
+  if p_reviewer is not null and v_ngo = 'verified' and v_ngo_by = p_reviewer then
+    flags := array_append(flags, 'ngoab_uploaded_by_reviewer');
+  end if;
+  if v_transfer_from is not null then flags := array_append(flags, 'ngo_transfer'); end if;
+
+  -- hard blockers
+  if r.requested_role <> 'admin' and v_org is null then blockers := array_append(blockers, 'organisation_missing'); end if;
+  if o.id is not null and not (
+       (r.requested_role = 'city_officer'    and o.type = 'city_authority') or
+       (r.requested_role = 'ngo_coordinator' and o.type = 'ngo') or
+       (r.requested_role = 'field_worker'    and o.type in ('city_authority','ngo')) or
+        r.requested_role = 'admin') then
+    blockers := array_append(blockers, 'organisation_type');
+  end if;
+  if r.requested_role in ('city_officer','field_worker','admin') and v_emp is null then blockers := array_append(blockers, 'staff_id_missing'); end if;
+  if v_taken then blockers := array_append(blockers, 'staff_id_taken'); end if;
+  if r.requested_role = 'ngo_coordinator' and p.phone is null then blockers := array_append(blockers, 'phone_missing'); end if;
+  if v_seat is not null then blockers := array_append(blockers, 'ngo_seat_taken'); end if;
+  if s.require_official_email and not v_email_ok then blockers := array_append(blockers, 'email_domain'); end if;
+  if s.require_email_confirmed and not v_mail_ok then blockers := array_append(blockers, 'email_unconfirmed'); end if;
+  if s.require_phone_verification and p.phone_verified_at is null then blockers := array_append(blockers, 'phone_unverified'); end if;
+  if s.require_documents and r.source = 'self' and v_docs = 0 then blockers := array_append(blockers, 'documents_missing'); end if;
+  if not coalesce(p.is_active, false) then blockers := array_append(blockers, 'account_inactive'); end if;
+
+  v_required := case when r.source = 'admin' or r.requested_role = any(s.two_person_roles) or cardinality(flags) > 0
+                     then 2 else 1 end;
+  select coalesce(jsonb_agg(jsonb_build_object('admin_id', a.admin_id, 'name', ap.full_name, 'at', a.created_at, 'note', a.note)
+                            order by a.created_at), '[]'::jsonb)
+    into v_approvals
+    from role_request_approvals a left join profiles ap on ap.id = a.admin_id where a.request_id = r.id;
+
+  return jsonb_build_object(
+    'email', v_email, 'email_domain', v_dstatus, 'email_policy_ok', v_email_ok, 'email_policy_message', v_email_msg,
+    'email_confirmed', v_mail_ok,
+    'phone', p.phone, 'phone_verified', p.phone_verified_at is not null,
+    'roster', v_roster, 'ngoab', v_ngo, 'registration_no', v_reg,
+    'staff_id', v_emp, 'staff_id_taken', v_taken, 'documents', v_docs,
+    'ngo_seat', v_seat, 'ngo_transfer_from', v_transfer_from,
+    'flags', to_jsonb(flags), 'blockers', to_jsonb(blockers),
+    'required_approvals', v_required, 'approvals', v_approvals);
+end $$;
+revoke execute on function public.rm_request_checks(role_requests, uuid, uuid) from anon, authenticated, public;
+
+
+-- ================= migrations/011_officer_area_view.sql =================
+-- =====================================================================
+-- ResilioMesh — 011 officers SEE only their own area
+-- ---------------------------------------------------------------------
+-- Migration 009 limited what a Water Resilience Officer (role `city_officer`) may
+-- CHANGE to their area (Dhaka North = DNCC, Dhaka South = DSCC) but let them
+-- read the whole city. From this migration an officer also only SEES their
+-- own area: wards, incidents (+ history, risk assessments), drainage assets,
+-- community needs, resources, plans, allocations, tasks, workflow runs and
+-- steps, historical flood events, and the two dashboard RPCs.
+--
+--   * An officer always sees their own reports and their own authority's
+--     resources, wherever they are.
+--   * An officer whose authority has no area sees nothing area-bound (fail-safe).
+--   * Admins, NGO coordinators, field workers and citizens are unchanged.
+--
+-- Requires 009. Re-runnable. If you re-run 003_rls.sql or 004_rpc.sql,
+-- run 009 and then this file again.
+-- =====================================================================
+
+-- ---------- 1. Helpers ----------------------------------------------------
+-- May the caller SEE rows of this ward? true for every role except officers.
+create or replace function public.rm_sees_ward(p_ward text) returns boolean
+language sql stable security definer set search_path = public as $$
+  select rm_role() is distinct from 'city_officer'
+      or exists (select 1 from wards w where w.id = p_ward and w.city_corporation = rm_area())
+$$;
+
+-- every incident of the list is in the caller's view (plans, workflow runs)
+create or replace function public.rm_sees_incidents(p_incident_ids uuid[]) returns boolean
+language sql stable security definer set search_path = public as $$
+  select rm_role() is distinct from 'city_officer'
+      or (coalesce(array_length(p_incident_ids, 1), 0) > 0
+          and not exists (select 1 from incidents i
+                           where i.id = any(p_incident_ids) and not rm_sees_ward(i.ward_id)))
+$$;
+
+create or replace function public.rm_sees_incident(p_incident_id uuid) returns boolean
+language sql stable security definer set search_path = public as $$
+  select rm_role() is distinct from 'city_officer'
+      or exists (select 1 from incidents i where i.id = p_incident_id and rm_sees_ward(i.ward_id))
+$$;
+
+create or replace function public.rm_sees_need(p_need_id uuid) returns boolean
+language sql stable security definer set search_path = public as $$
+  select rm_role() is distinct from 'city_officer'
+      or exists (select 1 from community_needs n where n.id = p_need_id and rm_sees_ward(n.ward_id))
+$$;
+
+create or replace function public.rm_sees_plan(p_plan_id uuid) returns boolean
+language sql stable security definer set search_path = public as $$
+  select rm_role() is distinct from 'city_officer'
+      or exists (select 1 from allocation_plans p where p.id = p_plan_id and rm_sees_incidents(p.incident_ids))
+$$;
+
+create or replace function public.rm_sees_run(p_run_id uuid) returns boolean
+language sql stable security definer set search_path = public as $$
+  select rm_role() is distinct from 'city_officer'
+      or exists (select 1 from workflow_runs r where r.id = p_run_id and rm_sees_plan(r.plan_id))
+$$;
+
+grant execute on function public.rm_sees_ward(text) to anon, authenticated;
+grant execute on function public.rm_sees_incidents(uuid[]) to authenticated;
+grant execute on function public.rm_sees_incident(uuid) to authenticated;
+grant execute on function public.rm_sees_need(uuid) to authenticated;
+grant execute on function public.rm_sees_plan(uuid) to authenticated;
+grant execute on function public.rm_sees_run(uuid) to authenticated;
+
+-- ---------- 2. Read policies ---------------------------------------------
+drop policy if exists wards_read on wards;
+create policy wards_read on wards for select to anon, authenticated
+  using (rm_sees_ward(id));
+
+drop policy if exists assets_read on drainage_assets;
+create policy assets_read on drainage_assets for select to authenticated
+  using (rm_sees_ward(ward_id));
+
+drop policy if exists incidents_read on incidents;
+create policy incidents_read on incidents for select to authenticated
+  using (reporter_id = auth.uid() or (rm_is_staff() and rm_sees_ward(ward_id)));
+
+drop policy if exists ish_read on incident_status_history;
+create policy ish_read on incident_status_history for select to authenticated
+  using (exists (select 1 from incidents i where i.id = incident_id
+                   and (i.reporter_id = auth.uid() or (rm_is_staff() and rm_sees_ward(i.ward_id)))));
+
+drop policy if exists risk_read on risk_assessments;
+create policy risk_read on risk_assessments for select to authenticated
+  using (rm_is_staff() and rm_sees_ward(ward_id));
+
+drop policy if exists resources_read on resources;
+create policy resources_read on resources for select to authenticated
+  using (rm_is_staff() and (organization_id = rm_org() or rm_sees_ward(base_ward_id)));
+
+drop policy if exists needs_read on community_needs;
+create policy needs_read on community_needs for select to authenticated
+  using (submitted_by = auth.uid() or (rm_is_staff() and rm_sees_ward(ward_id)));
+
+drop policy if exists plans_read on allocation_plans;
+create policy plans_read on allocation_plans for select to authenticated
+  using (rm_role() in ('city_officer','ngo_coordinator','admin') and rm_sees_incidents(incident_ids));
+
+drop policy if exists alloc_read on allocations;
+create policy alloc_read on allocations for select to authenticated
+  using (rm_role() in ('city_officer','ngo_coordinator','admin')
+         and (case when incident_id is not null then rm_sees_incident(incident_id)
+                   else rm_sees_need(need_id) end));
+
+drop policy if exists tasks_read on tasks;
+create policy tasks_read on tasks for select to authenticated
+  using (assigned_to = auth.uid()
+         or (rm_role() in ('city_officer','ngo_coordinator','admin') and rm_sees_incident(incident_id)));
+
+drop policy if exists runs_read on workflow_runs;
+create policy runs_read on workflow_runs for select to authenticated
+  using (rm_role() in ('city_officer','ngo_coordinator','admin') and rm_sees_plan(plan_id));
+
+drop policy if exists steps_read on workflow_steps;
+create policy steps_read on workflow_steps for select to authenticated
+  using (rm_role() in ('city_officer','ngo_coordinator','admin') and rm_sees_run(run_id));
+
+drop policy if exists hfe_read on historical_flood_events;
+create policy hfe_read on historical_flood_events for select to authenticated
+  using (rm_is_staff() and rm_sees_ward(ward_id));
+
+-- ---------- 3. Dashboard RPCs (SECURITY DEFINER, so they filter themselves) --
+create or replace function public.ward_risk_summary()
+returns table(ward_id text, name text, city_corporation text, lat double precision, lng double precision,
+              population integer, risk_score numeric, risk_level risk_level, risk_updated_at timestamptz,
+              active_incidents bigint, critical_incidents bigint)
+language sql stable security definer set search_path = public as $$
+  select w.id, w.name, w.city_corporation, w.lat, w.lng, w.population,
+         w.current_risk_score, w.current_risk_level, w.risk_updated_at,
+         count(i.id) filter (where i.status in ('reported','verified','assessed','approved','in_progress')),
+         count(i.id) filter (where i.status in ('verified','assessed','approved','in_progress') and i.risk_level = 'critical')
+  from wards w
+  left join incidents i on i.ward_id = w.id
+  where rm_sees_ward(w.id)
+  group by w.id
+  order by w.current_risk_score desc nulls last
+$$;
+revoke execute on function public.ward_risk_summary() from anon;
+grant execute on function public.ward_risk_summary() to authenticated;
+
+create or replace function public.analytics_dashboard(p_days integer default 30, p_ward text default null)
+returns jsonb
+language plpgsql stable security definer set search_path = public as $$
+declare
+  v_from timestamptz;
+  v_out  jsonb;
+begin
+  if not rm_is_staff() then raise exception 'FORBIDDEN' using errcode = '42501'; end if;
+  if p_days is null or p_days < 1 or p_days > 3650 then
+    raise exception 'VALIDATION: days must be between 1 and 3650' using errcode = '22023';
+  end if;
+  v_from := now() - make_interval(days => p_days);
+
+  with vw as (                       -- wards the caller may see (officers: own area only)
+    select * from wards where rm_sees_ward(id) and (p_ward is null or id = p_ward)
+  ), inc as (
+    select * from incidents
+    where created_at >= v_from and ward_id in (select id from vw)
+  )
+  select jsonb_build_object(
+    'generated_at', now(),
+    'window_days', p_days,
+    'totals', (select jsonb_build_object(
+        'incidents', count(*),
+        'active', count(*) filter (where status in ('reported','verified','assessed','approved','in_progress')),
+        'resolved', count(*) filter (where status = 'resolved'),
+        'duplicates', count(*) filter (where status = 'duplicate'),
+        'critical', count(*) filter (where risk_level = 'critical'),
+        'people_affected', coalesce(sum(people_affected) filter (where status <> 'duplicate'), 0),
+        'avg_risk', round(avg(risk_score)::numeric, 1),
+        'avg_resolution_hours', round((extract(epoch from avg(resolved_at - created_at)) / 3600)::numeric, 1),
+        'p90_resolution_hours', round((percentile_cont(0.9) within group (order by extract(epoch from resolved_at - created_at)) / 3600)::numeric, 1)
+      ) from inc),
+    'by_status', (select coalesce(jsonb_object_agg(status, c), '{}'::jsonb)
+                  from (select status, count(*) c from inc group by status) s),
+    'by_category', (select coalesce(jsonb_agg(jsonb_build_object('category', category, 'count', c) order by c desc), '[]'::jsonb)
+                    from (select category, count(*) c from inc where status <> 'duplicate' group by category) s),
+    'by_ward', (select coalesce(jsonb_agg(row_to_json(s) order by s.incidents desc), '[]'::jsonb) from (
+                  select w.id as ward_id, w.name, count(inc.id) as incidents,
+                         round(avg(inc.risk_score)::numeric,1) as avg_risk,
+                         count(inc.id) filter (where inc.risk_level in ('high','critical')) as high_risk,
+                         w.current_risk_score
+                  from vw w left join inc on inc.ward_id = w.id
+                  group by w.id, w.name, w.current_risk_score) s),
+    'daily', (select coalesce(jsonb_agg(row_to_json(d) order by d.day), '[]'::jsonb) from (
+                select g::date as day,
+                       count(inc.id) filter (where inc.status <> 'duplicate') as reported,
+                       count(inc.id) filter (where inc.status = 'resolved') as resolved
+                from generate_series(date_trunc('day', v_from), date_trunc('day', now()), interval '1 day') g
+                left join inc on date_trunc('day', inc.created_at) = g
+                group by g) d),
+    'resources', (select coalesce(jsonb_agg(row_to_json(r)), '[]'::jsonb) from (
+                select resource_type, sum(quantity_total) as total, sum(quantity_available) as available,
+                       round(100.0 * (sum(quantity_total) - sum(quantity_available)) / nullif(sum(quantity_total),0), 1) as utilization_pct
+                from resources
+                where rm_role() is distinct from 'city_officer' or organization_id = rm_org() or rm_sees_ward(base_ward_id)
+                group by resource_type order by resource_type) r),
+    'workflows', (select coalesce(jsonb_object_agg(status, c), '{}'::jsonb)
+                  from (select status, count(*) c from workflow_runs
+                         where created_at >= v_from and rm_sees_plan(plan_id) group by status) s),
+    'historical', jsonb_build_object(
+        'total_records', (select count(*) from historical_flood_events where ward_id in (select id from vw)),
+        'monthly', (select coalesce(jsonb_agg(row_to_json(m) order by m.month), '[]'::jsonb) from (
+            select extract(month from event_date)::int as month,
+                   count(*) as events,
+                   round(avg(rainfall_mm)::numeric,1) as avg_rainfall_mm,
+                   round(avg(max_depth_cm)::numeric,1) as avg_depth_cm
+            from historical_flood_events
+            where ward_id in (select id from vw)
+            group by 1) m),
+        'yearly', (select coalesce(jsonb_agg(row_to_json(y) order by y.year), '[]'::jsonb) from (
+            select extract(year from event_date)::int as year, count(*) as events,
+                   coalesce(sum(households_affected),0) as households
+            from historical_flood_events
+            where ward_id in (select id from vw)
+            group by 1) y)
+    )
+  ) into v_out;
+  return v_out;
+end $$;
+grant execute on function public.analytics_dashboard(integer,text) to authenticated;
+
+
+-- ================= migrations/012_area_bound_staff.sql =================
+-- =====================================================================
+-- ResilioMesh — 012 North / South everywhere (area-bound staff)
+-- ---------------------------------------------------------------------
+-- 011 limited what Water Resilience Officers SEE to their area. This migration makes
+-- the North / South split consistent across the whole project:
+--
+--   * "Area-bound" staff = people of a city corporation:
+--       - Water Resilience Officers (always; an officer whose authority has no area
+--         sees nothing area-bound — fail-safe), and
+--       - Field Workers of Dhaka North / Dhaka South City Corporation.
+--     NGO field workers, NGO coordinators, admins and citizens stay city-wide.
+--   * Area-bound staff see only their area (every read policy of 011 and the
+--     dashboard RPCs, plus the per-ward weather cache).
+--   * Area-bound staff can only file reports and log community needs in their
+--     area. A place belongs to the area of its nearest ward centre — the same
+--     rule that already decides a report's ward (migration 008).
+--   * ward_areas(): public ward centres + area, so maps can shade the other
+--     city corporation as "not your area". No risk, report or people data.
+--
+-- Requires 009 and 011. Re-runnable. If you re-run 011, run this file again.
+-- =====================================================================
+
+-- ---------- 1. Who is bound to an area -----------------------------------
+-- null = city-wide; 'DNCC' / 'DSCC' = only that area; '-' = nothing (officer without area)
+create or replace function public.rm_view_area() returns text
+language sql stable security definer set search_path = public as $$
+  select case rm_role()
+           when 'city_officer' then coalesce(rm_area(), '-')
+           when 'field_worker' then rm_area()        -- authority crews: their area; NGO crews: null
+         end
+$$;
+grant execute on function public.rm_view_area() to authenticated;
+
+-- area of a point = area of the nearest ward centre (same rule as report → ward in 008)
+create or replace function public.rm_area_at(p_lat double precision, p_lng double precision) returns text
+language sql stable security definer set search_path = public as $$
+  select city_corporation from wards
+   order by st_distance(location, st_setsrid(st_makepoint(p_lng, p_lat), 4326)::geography)
+   limit 1
+$$;
+grant execute on function public.rm_area_at(double precision, double precision) to anon, authenticated;
+
+-- ---------- 2. Visibility helpers (same names as 011, now for all area-bound staff)
+create or replace function public.rm_sees_ward(p_ward text) returns boolean
+language sql stable security definer set search_path = public as $$
+  select rm_view_area() is null
+      or exists (select 1 from wards w where w.id = p_ward and w.city_corporation = rm_view_area())
+$$;
+
+create or replace function public.rm_sees_incidents(p_incident_ids uuid[]) returns boolean
+language sql stable security definer set search_path = public as $$
+  select rm_view_area() is null
+      or (coalesce(array_length(p_incident_ids, 1), 0) > 0
+          and not exists (select 1 from incidents i
+                           where i.id = any(p_incident_ids) and not rm_sees_ward(i.ward_id)))
+$$;
+
+create or replace function public.rm_sees_incident(p_incident_id uuid) returns boolean
+language sql stable security definer set search_path = public as $$
+  select rm_view_area() is null
+      or exists (select 1 from incidents i where i.id = p_incident_id and rm_sees_ward(i.ward_id))
+$$;
+
+create or replace function public.rm_sees_need(p_need_id uuid) returns boolean
+language sql stable security definer set search_path = public as $$
+  select rm_view_area() is null
+      or exists (select 1 from community_needs n where n.id = p_need_id and rm_sees_ward(n.ward_id))
+$$;
+
+create or replace function public.rm_sees_plan(p_plan_id uuid) returns boolean
+language sql stable security definer set search_path = public as $$
+  select rm_view_area() is null
+      or exists (select 1 from allocation_plans p where p.id = p_plan_id and rm_sees_incidents(p.incident_ids))
+$$;
+
+create or replace function public.rm_sees_run(p_run_id uuid) returns boolean
+language sql stable security definer set search_path = public as $$
+  select rm_view_area() is null
+      or exists (select 1 from workflow_runs r where r.id = p_run_id and rm_sees_plan(r.plan_id))
+$$;
+
+-- ---------- 3. Policies not covered by 011 --------------------------------
+drop policy if exists weather_read on weather_cache;
+create policy weather_read on weather_cache for select to authenticated
+  using (rm_sees_ward(ward_id));
+
+-- ---------- 4. Area-bound staff report / log needs only in their area ----
+create or replace function public.rm_area_write_guard() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare v_area text := rm_view_area(); v_ward_area text; v_pin_area text;
+begin
+  if rm_is_system() or v_area is null then return new; end if;
+  select city_corporation into v_ward_area from wards where id = new.ward_id;
+  if TG_TABLE_NAME = 'incidents' then v_pin_area := rm_area_at(new.lat, new.lng); end if;
+  if v_area = '-' or v_ward_area is distinct from v_area
+     or (v_pin_area is not null and v_pin_area is distinct from v_area) then
+    raise exception 'FORBIDDEN: this place is in %, outside your area (%)',
+      rm_area_label(coalesce(v_pin_area, v_ward_area)), rm_area_label(nullif(v_area, '-')) using errcode = '42501';
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists trg_incident_area_guard on incidents;
+create trigger trg_incident_area_guard before insert on incidents
+  for each row execute function rm_area_write_guard();
+drop trigger if exists trg_need_area_guard on community_needs;
+create trigger trg_need_area_guard before insert on community_needs
+  for each row execute function rm_area_write_guard();
+
+-- ---------- 5. Public ward centres + area (for map shading) ---------------
+create or replace function public.ward_areas()
+returns table(ward_id text, city_corporation text, lat double precision, lng double precision)
+language sql stable security definer set search_path = public as $$
+  select id, city_corporation, lat, lng from wards order by id
+$$;
+grant execute on function public.ward_areas() to anon, authenticated;
+
+-- ---------- 6. Analytics: resources filter for every area-bound role ------
+create or replace function public.analytics_dashboard(p_days integer default 30, p_ward text default null)
+returns jsonb
+language plpgsql stable security definer set search_path = public as $$
+declare
+  v_from timestamptz;
+  v_out  jsonb;
+begin
+  if not rm_is_staff() then raise exception 'FORBIDDEN' using errcode = '42501'; end if;
+  if p_days is null or p_days < 1 or p_days > 3650 then
+    raise exception 'VALIDATION: days must be between 1 and 3650' using errcode = '22023';
+  end if;
+  v_from := now() - make_interval(days => p_days);
+
+  with vw as (                       -- wards the caller may see (area-bound staff: own area only)
+    select * from wards where rm_sees_ward(id) and (p_ward is null or id = p_ward)
+  ), inc as (
+    select * from incidents
+    where created_at >= v_from and ward_id in (select id from vw)
+  )
+  select jsonb_build_object(
+    'generated_at', now(),
+    'window_days', p_days,
+    'totals', (select jsonb_build_object(
+        'incidents', count(*),
+        'active', count(*) filter (where status in ('reported','verified','assessed','approved','in_progress')),
+        'resolved', count(*) filter (where status = 'resolved'),
+        'duplicates', count(*) filter (where status = 'duplicate'),
+        'critical', count(*) filter (where risk_level = 'critical'),
+        'people_affected', coalesce(sum(people_affected) filter (where status <> 'duplicate'), 0),
+        'avg_risk', round(avg(risk_score)::numeric, 1),
+        'avg_resolution_hours', round((extract(epoch from avg(resolved_at - created_at)) / 3600)::numeric, 1),
+        'p90_resolution_hours', round((percentile_cont(0.9) within group (order by extract(epoch from resolved_at - created_at)) / 3600)::numeric, 1)
+      ) from inc),
+    'by_status', (select coalesce(jsonb_object_agg(status, c), '{}'::jsonb)
+                  from (select status, count(*) c from inc group by status) s),
+    'by_category', (select coalesce(jsonb_agg(jsonb_build_object('category', category, 'count', c) order by c desc), '[]'::jsonb)
+                    from (select category, count(*) c from inc where status <> 'duplicate' group by category) s),
+    'by_ward', (select coalesce(jsonb_agg(row_to_json(s) order by s.incidents desc), '[]'::jsonb) from (
+                  select w.id as ward_id, w.name, count(inc.id) as incidents,
+                         round(avg(inc.risk_score)::numeric,1) as avg_risk,
+                         count(inc.id) filter (where inc.risk_level in ('high','critical')) as high_risk,
+                         w.current_risk_score
+                  from vw w left join inc on inc.ward_id = w.id
+                  group by w.id, w.name, w.current_risk_score) s),
+    'daily', (select coalesce(jsonb_agg(row_to_json(d) order by d.day), '[]'::jsonb) from (
+                select g::date as day,
+                       count(inc.id) filter (where inc.status <> 'duplicate') as reported,
+                       count(inc.id) filter (where inc.status = 'resolved') as resolved
+                from generate_series(date_trunc('day', v_from), date_trunc('day', now()), interval '1 day') g
+                left join inc on date_trunc('day', inc.created_at) = g
+                group by g) d),
+    'resources', (select coalesce(jsonb_agg(row_to_json(r)), '[]'::jsonb) from (
+                select resource_type, sum(quantity_total) as total, sum(quantity_available) as available,
+                       round(100.0 * (sum(quantity_total) - sum(quantity_available)) / nullif(sum(quantity_total),0), 1) as utilization_pct
+                from resources
+                where organization_id = rm_org() or rm_sees_ward(base_ward_id)
+                group by resource_type order by resource_type) r),
+    'workflows', (select coalesce(jsonb_object_agg(status, c), '{}'::jsonb)
+                  from (select status, count(*) c from workflow_runs
+                         where created_at >= v_from and rm_sees_plan(plan_id) group by status) s),
+    'historical', jsonb_build_object(
+        'total_records', (select count(*) from historical_flood_events where ward_id in (select id from vw)),
+        'monthly', (select coalesce(jsonb_agg(row_to_json(m) order by m.month), '[]'::jsonb) from (
+            select extract(month from event_date)::int as month,
+                   count(*) as events,
+                   round(avg(rainfall_mm)::numeric,1) as avg_rainfall_mm,
+                   round(avg(max_depth_cm)::numeric,1) as avg_depth_cm
+            from historical_flood_events
+            where ward_id in (select id from vw)
+            group by 1) m),
+        'yearly', (select coalesce(jsonb_agg(row_to_json(y) order by y.year), '[]'::jsonb) from (
+            select extract(year from event_date)::int as year, count(*) as events,
+                   coalesce(sum(households_affected),0) as households
+            from historical_flood_events
+            where ward_id in (select id from vw)
+            group by 1) y)
+    )
+  ) into v_out;
+  return v_out;
+end $$;
+grant execute on function public.analytics_dashboard(integer,text) to authenticated;

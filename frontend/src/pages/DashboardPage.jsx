@@ -8,6 +8,7 @@ import { useDebouncedCallback, useRealtime } from '../hooks/useRealtime'
 import { supabase } from '../lib/supabase'
 import { CATEGORY_LABEL, RESOURCE_LABEL, fmtNum, timeAgo } from '../lib/format'
 import { errorMessage } from '../lib/errors'
+import { areaLabel } from '../lib/areas'
 
 export default function DashboardPage() {
   const { profile } = useAuth()
@@ -24,6 +25,7 @@ function Greeting() {
 }
 
 function StaffDashboard() {
+  const { area } = useAuth()
   const [a, setA] = useState(null)
   const [wards, setWards] = useState([])
   const [queues, setQueues] = useState({ reported: [], verified: [], plans: [] })
@@ -50,7 +52,7 @@ function StaffDashboard() {
   const t = a?.totals || {}
   return (
     <>
-      <Hero icon={ShieldCheck} eyebrow="Drainage command center" title="Operations overview" subtitle={<Greeting />}
+      <Hero icon={ShieldCheck} eyebrow={area ? `Drainage command center · ${areaLabel(area)}` : 'Drainage command center'} title={area ? `${areaLabel(area)} operations overview` : 'Operations overview'} subtitle={<Greeting />}
         actions={<Link to="/incidents/new"><Button className="!bg-white !from-white !to-white !text-brand-800 hover:!bg-brand-50"><Plus className="h-4 w-4" />New report</Button></Link>}
         stats={[['Awaiting verification', queues.reported.length], ['Awaiting AI assessment', queues.verified.length], ['Plans to approve', queues.plans.length]]} />
       {err && <Alert tone="error" className="mb-4">{err}</Alert>}
