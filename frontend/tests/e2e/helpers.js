@@ -10,12 +10,10 @@ export const USERS = {
   citizen: 'citizen@resiliomesh.demo',
 }
 
-// role-specific sign-in IDs set by migration 007 / seed_demo.py
 export const SIGNIN_ID = {
   admin: 'ADM-001', admin2: 'ADM-002', officer: 'DSCC-OFF-01', officer2: 'DNCC-OFF-02', field: 'FW-001',
 }
 
-// capsule tab each demo account must sign in on
 export const ROLE_OF = {
   admin: 'admin', admin2: 'admin', officer: 'city_officer', officer2: 'city_officer', ngo: 'ngo_coordinator',
   ngo2: 'ngo_coordinator', field: 'field_worker', citizen: 'citizen',

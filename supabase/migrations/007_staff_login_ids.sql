@@ -1,19 +1,7 @@
--- =====================================================================
--- ResilioMesh — 007 role-specific sign-in identifiers
--- ---------------------------------------------------------------------
--- Staff sign in with email + password + their role identifier:
---   City Officer → Employee ID · Field Worker → Staff ID · Admin → Admin ID
---   NGO Coordinator → their NGO (profiles.organization_id)
--- The identifier lives on the profile, is set when an admin approves an
--- access request (or by an admin directly) and cannot be self-edited.
--- Run after 006_role_requests.sql.
--- =====================================================================
-
 alter table profiles add column if not exists employee_id text
   check (employee_id is null or employee_id ~ '^[A-Za-z0-9/-]{3,30}$');
 create unique index if not exists uq_profiles_employee_id on profiles (upper(employee_id)) where employee_id is not null;
 
--- Only admins (or the backend/system) may change role / org / active flag / staff ID.
 create or replace function public.rm_guard_profile() returns trigger
 language plpgsql security definer set search_path = public as $$
 begin
@@ -32,7 +20,6 @@ begin
   return new;
 end $$;
 
--- Approving an access request now also copies the Employee / Staff ID to the profile.
 create or replace function public.rm_review_role_request(
   p_id uuid, p_approve boolean, p_org_id uuid default null, p_note text default null)
 returns role_requests
@@ -73,7 +60,6 @@ begin
 end $$;
 grant execute on function public.rm_review_role_request(uuid, boolean, uuid, text) to authenticated;
 
--- Demo accounts (judges): give every staff account its sign-in ID.
 update profiles p set employee_id = d.eid
 from (values
   ('admin@resiliomesh.demo',    'ADM-001'),

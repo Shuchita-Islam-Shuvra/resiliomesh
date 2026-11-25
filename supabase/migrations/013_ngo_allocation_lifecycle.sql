@@ -1,14 +1,3 @@
--- =====================================================================
--- ResilioMesh — 013 NGO coordinator: finish the aid lifecycle
--- Before: a coordinator could only RESERVE stock for a need. Nothing could mark it
--- delivered, give the stock back, or cancel a need, and any coordinator could edit
--- another NGO's needs directly. Now:
---   reserved -> dispatched -> consumed (delivered)      ngo_update_allocation()
---   reserved | dispatched -> released (stock returned)  ngo_update_allocation()
---   open / partially_fulfilled -> cancelled             cancel_need()
--- Idempotent: safe to re-run.
--- =====================================================================
-
 create or replace function public.ngo_update_allocation(
   p_allocation_id uuid, p_action text, p_reason text default null
 ) returns jsonb
@@ -40,7 +29,6 @@ begin
 
   v_new := case p_action when 'dispatch' then 'dispatched' when 'deliver' then 'consumed' else 'released' end;
 
-  -- idempotent replay: already in the requested end state
   if v_alloc.status = v_new then
     return jsonb_build_object('ok', true, 'replayed', true, 'allocation', to_jsonb(v_alloc));
   end if;
@@ -56,7 +44,6 @@ begin
   end if;
 
   if p_action = 'cancel' then
-    -- lock order matches allocate_to_need: need row first, then the stock row inside the release
     select * into v_need from community_needs where id = v_alloc.need_id for update;
     v_alloc := rm_release_allocation(p_allocation_id, coalesce(nullif(trim(p_reason), ''), 'cancelled by coordinator'));
     update community_needs
@@ -104,8 +91,6 @@ end $$;
 grant execute on function public.ngo_update_allocation(uuid,text,text) to authenticated;
 grant execute on function public.cancel_need(uuid,text) to authenticated;
 
--- Direct edits of a need by coordinators were unrestricted (any NGO, any column). Everything the
--- UI does now goes through RPCs, so direct updates are limited to the coordinator's own / unclaimed needs.
 drop policy if exists needs_update on community_needs;
 create policy needs_update on community_needs for update to authenticated
   using (rm_role() = 'admin'

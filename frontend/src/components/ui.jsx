@@ -4,7 +4,6 @@ import { animate, motion, useInView } from 'framer-motion'
 import { ChevronDown, ChevronUp, ChevronsUpDown, Loader2, X } from 'lucide-react'
 import { RISK_COLOR, STATUS_STYLE, humanize } from '../lib/format'
 
-/** Counts up from 0 to `value` when scrolled into view. Non-numeric values render as-is. */
 export function AnimatedNumber({ value, decimals = 0, suffix = '' }) {
   const ref = useRef(null)
   const inView = useInView(ref, { once: true })
@@ -149,7 +148,6 @@ export const Select = ({ children, ...p }) => <select {...p} className={`${input
 
 export function Modal({ open, onClose, title, children, footer, wide, plain }) {
   const ref = useRef()
-  // keep the latest onClose in a ref so inline callbacks don't re-run the effect (which re-stole focus on every keystroke)
   const closeRef = useRef(onClose)
   closeRef.current = onClose
   useEffect(() => {
@@ -161,7 +159,6 @@ export function Modal({ open, onClose, title, children, footer, wide, plain }) {
     return () => { document.removeEventListener('keydown', onKey); prev?.focus?.() }
   }, [open])
   if (!open) return null
-  // portal to <body>: an ancestor with transform/backdrop-filter (e.g. Card) would otherwise trap the fixed overlay
   return createPortal(
     <div className={`fixed inset-0 z-[900] flex items-end justify-center ${plain ? 'bg-transparent' : 'bg-slate-900/50'} p-0 sm:items-center sm:p-4`} onMouseDown={(e) => e.target === e.currentTarget && onClose?.()}>
       <div ref={ref} role="dialog" aria-modal="true" aria-label={title}
@@ -211,7 +208,6 @@ export function Alert({ tone = 'info', title, children, className = '' }) {
   )
 }
 
-/** Sortable column header (keyboard accessible) */
 export function SortTh({ label, field, sort, onSort, className = '' }) {
   const active = sort.field === field
   const Icon = !active ? ChevronsUpDown : sort.dir === 'asc' ? ChevronUp : ChevronDown

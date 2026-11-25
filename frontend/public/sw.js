@@ -1,5 +1,3 @@
-/* ResilioMesh service worker: app-shell caching so the Field Portal opens offline.
-   Data itself lives in IndexedDB (see src/offline). API calls are never cached here. */
 const CACHE = 'resiliomesh-shell-v1'
 const SHELL = ['/', '/index.html', '/icon.svg', '/manifest.webmanifest']
 
@@ -17,12 +15,10 @@ self.addEventListener('activate', (e) => {
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url)
   if (e.request.method !== 'GET' || url.origin !== self.location.origin) return
-  // SPA navigations: network first, fall back to cached shell
   if (e.request.mode === 'navigate') {
     e.respondWith(fetch(e.request).catch(() => caches.match('/index.html')))
     return
   }
-  // static assets: stale-while-revalidate
   e.respondWith(
     caches.match(e.request).then((hit) => {
       const net = fetch(e.request).then((res) => {

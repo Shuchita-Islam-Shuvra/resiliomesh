@@ -1,9 +1,3 @@
-"""Deterministic rule engine layered on top of the ML score.
-
-ML gives a calibrated estimate; rules encode non-negotiable operational policy
-(e.g. 45 cm of standing water is always at least HIGH). Every fired rule is
-returned so the decision is fully explainable.
-"""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -65,16 +59,15 @@ def apply_rules(ml_score: float, context: dict) -> dict:
                 score = rule.apply(score)
                 fired.append({"code": rule.code, "description": rule.description,
                               "delta": round(score - before, 2)})
-        except Exception:  # a malformed context field must never break scoring
+        except Exception:
             continue
     score = round(min(100.0, max(0.0, score)), 2)
     return {"score": score, "level": level_for(score), "rules_fired": fired}
 
 
 def priority(score: float, people_affected: int | None, severity_reported: int | None, age_hours: float) -> int:
-    """Dispatch priority 0-100 (higher = earlier)."""
     p = score * 0.6
     p += min(people_affected or 0, 2000) / 2000 * 20
     p += (severity_reported or 1) * 2.5
-    p += min(age_hours, 24) / 24 * 7.5     # starvation guard: old reports rise
+    p += min(age_hours, 24) / 24 * 7.5
     return int(round(min(100, p)))

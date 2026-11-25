@@ -15,7 +15,6 @@ const friendly = (err) => {
   return m
 }
 
-/** Enter the 6-digit code from the authenticator app (raises the session to AAL2). */
 export function TotpChallenge({ onDone }) {
   const { mfa } = useAuth()
   const [code, setCode] = useState('')
@@ -42,7 +41,6 @@ export function TotpChallenge({ onDone }) {
   )
 }
 
-/** Set up an authenticator app: QR code → first code → factor verified (session becomes AAL2). */
 export function TotpEnroll({ onDone, required }) {
   const { mfa } = useAuth()
   const [factor, setFactor] = useState(null)
@@ -89,7 +87,6 @@ export function TotpEnroll({ onDone, required }) {
   )
 }
 
-/** Verify a Bangladeshi mobile number with an SMS one-time code (Supabase phone_change OTP). */
 export function PhoneVerify({ initialPhone = '', onDone }) {
   const { startPhoneVerification, confirmPhone } = useAuth()
   const [phone, setPhone] = useState(initialPhone || '')

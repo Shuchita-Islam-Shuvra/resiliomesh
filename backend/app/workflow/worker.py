@@ -1,9 +1,3 @@
-"""Background worker: claims queued workflow runs (FOR UPDATE SKIP LOCKED) and executes them.
-
-Run standalone:   python -m app.workflow.worker
-Or in-process:    WORKER_IN_PROCESS=true (default) starts a daemon thread with the API.
-Multiple workers can run concurrently: SKIP LOCKED guarantees a run is claimed once.
-"""
 from __future__ import annotations
 
 import logging
@@ -40,7 +34,7 @@ def loop(poll_s: float | None = None, worker_id: str | None = None) -> None:
     while not _stop.is_set():
         status["last_poll"] = time.time()
         try:
-            while run_once(engine, worker_id):   # drain queue
+            while run_once(engine, worker_id):
                 pass
         except Exception:
             status["errors"] += 1

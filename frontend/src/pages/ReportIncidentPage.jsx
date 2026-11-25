@@ -29,14 +29,13 @@ export default function ReportIncidentPage() {
   const [busy, setBusy] = useState(false)
   const [nearby, setNearby] = useState([])
   const [clientId] = useState(uuid)
-  const wardAreas = useWardAreas()          // stable per form -> double-submit safe
+  const wardAreas = useWardAreas()
 
   useEffect(() => { supabase.from('wards').select('id,name,lat,lng').order('name').then(({ data }) => setWards(data || [])) }, [])
   useEffect(() => {
     if (!v.ward_id) return
     supabase.from('drainage_assets').select('id,code,name').eq('ward_id', v.ward_id).then(({ data }) => setAssets(data || []))
   }, [v.ward_id])
-  // warn about likely duplicates before submitting (server also auto-flags them)
   useEffect(() => {
     if (!v.lat || !v.lng || !online || profile.role === 'citizen') { setNearby([]); return }
     supabase.rpc('nearby_incidents', { p_lat: Number(v.lat), p_lng: Number(v.lng), p_radius_m: 200 })
@@ -46,7 +45,7 @@ export default function ReportIncidentPage() {
   const set = (k) => (e) => setV({ ...v, [k]: e.target.value })
   const pick = ({ lat, lng }) => {
     let ward = v.ward_id
-    if (wards.length) {   // auto-select the nearest ward centroid
+    if (wards.length) {
       ward = wards.reduce((best, w) => ((w.lat - lat) ** 2 + (w.lng - lng) ** 2 < (best.lat - lat) ** 2 + (best.lng - lng) ** 2 ? w : best)).id
     }
     setV((x) => ({ ...x, lat, lng, ward_id: ward }))
@@ -63,8 +62,6 @@ export default function ReportIncidentPage() {
   const submit = async (e) => {
     e.preventDefault()
     const errs = validateReport(v)
-    // Water Resilience Officers report only in their own area (their ward list is that area only)
-    // (a place belongs to the area of its nearest ward centre; the database checks the same)
     const pinArea = !errs.location && area ? areaAt(wardAreas, Number(v.lat), Number(v.lng)) : null
     if (pinArea && pinArea !== area)
       errs.location = `This place is in ${areaLabel(pinArea)}. You can report only inside your area (${areaLabel(area)}).`
@@ -101,7 +98,6 @@ export default function ReportIncidentPage() {
     } finally { setBusy(false) }
   }
 
-  // the database refuses citizen reports without an SMS-verified Bangladeshi number when this is switched on
   const needsPhone = profile.role === 'citizen' && security?.require_phone_verification && !security?.phone_verified
   if (needsPhone) {
     return (

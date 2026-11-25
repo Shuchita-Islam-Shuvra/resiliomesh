@@ -1,21 +1,3 @@
-"""Constraint-based resource allocation with Google OR-Tools CP-SAT (A02).
-
-Decision variable x[i,r] = units of resource pool r sent to incident i.
-
-Hard constraints
-  * sum_i x[i,r] <= available_r * (1 - reserve_ratio)          (stock + strategic reserve)
-  * sum_{r of type t} x[i,r] <= demand[i,t]                    (no over-supply)
-  * x[i,r] = 0 if distance(i,r) > max_distance_km              (response-time radius)
-  * pumps at i  =>  at least one crew at i                     (pump needs operators)
-  * (optional) every CRITICAL incident fully covered           (may be infeasible!)
-  * (optional) only pools of allowed organisations
-
-Objective: maximise risk-weighted fractional coverage, minus travel distance.
-
-If the hard model is INFEASIBLE we return a diagnosis (which incident / which
-resource type is short, by how much, which constraint conflicts) and — when
-allowed — a relaxed best-effort plan clearly flagged `relaxed=true`.
-"""
 from __future__ import annotations
 
 import math
@@ -88,7 +70,6 @@ def haversine_km(lat1, lng1, lat2, lng2) -> float:
 
 
 def derive_demand(category: str, water_depth_cm: int | None, people_affected: int | None, risk_level: str | None) -> dict[str, int]:
-    """Rule-based demand estimation from a field report."""
     depth = water_depth_cm or 0
     people = people_affected or 0
     households = math.ceil(people / 4.5) if people else 0
@@ -146,14 +127,12 @@ def optimize(incidents: list[IncidentDemand], pools: list[ResourcePool], c: Cons
              (c.allowed_org_ids is None or p.organization_id in c.allowed_org_ids)]
     usable = {p.id: int(math.floor(p.available * (1 - c.reserve_ratio))) for p in pools}
 
-    # pump => crew coupling adds implied crew demand
     for inc in incidents:
         if c.pump_requires_crew and inc.demand.get("pump", 0) > 0 and inc.demand.get("crew", 0) == 0:
             inc.demand["crew"] = 1
 
     dist = {(i.id, p.id): haversine_km(i.lat, i.lng, p.lat, p.lng) for i in incidents for p in pools}
 
-    # --- feasibility diagnosis for hard critical coverage ------------
     shortages = []
     for inc in incidents:
         for t, q in inc.demand.items():
@@ -161,7 +140,6 @@ def optimize(incidents: list[IncidentDemand], pools: list[ResourcePool], c: Cons
             if reach < q:
                 shortages.append({"incident_id": inc.id, "incident": inc.label, "risk_level": inc.risk_level,
                                   "resource_type": t, "required": q, "reachable": reach, "short_by": q - reach})
-    # aggregate shortage across critical incidents competing for same pools
     crit = [i for i in incidents if i.risk_level == "critical"]
     for t in {t for i in crit for t in i.demand}:
         need = sum(i.demand.get(t, 0) for i in crit)
@@ -194,7 +172,6 @@ def optimize(incidents: list[IncidentDemand], pools: list[ResourcePool], c: Cons
                     per_unit = max(1, weight * 100 // q)
                     objective += [per_unit * v for v in terms]
                 elif hard_critical and c.require_full_coverage_critical and inc.risk_level == "critical":
-                    # critical demand with no reachable pool: provably infeasible
                     never = m.NewIntVar(0, 0, f"never_{inc.id[:8]}_{t}")
                     m.Add(never == 1)
             if c.pump_requires_crew and "pump" in inc.demand:

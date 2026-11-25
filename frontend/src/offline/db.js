@@ -1,4 +1,3 @@
-// IndexedDB persistence for the Field Worker portal (works fully offline).
 import { openDB } from 'idb'
 
 const DB_NAME = 'resiliomesh-offline'

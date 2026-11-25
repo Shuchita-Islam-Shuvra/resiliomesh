@@ -15,7 +15,6 @@ const GROUPS = [
   { title: 'Drainage & terrain', items: [['drainage_capacity_mm_hr', 10, 50, 1, 'mm/h'], ['impervious_pct', 50, 100, 1, '%'], ['elevation_m', 3, 9, 0.1, 'm'], ['asset_condition', 0, 100, 1, '/100'], ['blocked_assets', 0, 8, 1, '']] },
   { title: 'History & signals', items: [['historical_events_10y', 0, 60, 1, ''], ['recent_reports_6h', 0, 10, 1, '']] },
 ]
-// Feature-importance bars are coloured by the kind of factor (validated categorical palette)
 const FACTOR_GROUPS = [
   { key: 'weather', label: 'Weather & season', color: '#2a78d6', features: ['rain_past_24h_mm', 'rain_next_24h_mm', 'max_hourly_mm', 'monsoon'] },
   { key: 'drainage', label: 'Drainage & terrain', color: '#eb6834', features: ['drainage_capacity_mm_hr', 'impervious_pct', 'elevation_m', 'asset_condition', 'blocked_assets'] },
@@ -50,7 +49,6 @@ function Gauge({ score, level }) {
 
 export default function RiskAnalysisPage() {
   const { hasRole, area } = useAuth()
-  // Water Resilience Officers re-score only their own area (Dhaka North / South)
   const rescoreLabel = `Re-score ${area ? `${areaLabel(area)} wards` : 'all wards'} with live weather`
   const toast = useToast()
   const [model, setModel] = useState(null)
@@ -91,7 +89,6 @@ export default function RiskAnalysisPage() {
       {modelErr && <Alert tone="error" className="mb-4">Backend unavailable: {modelErr}</Alert>}
 
       <div className="grid gap-5">
-        {/* ---------------- 1. Model (full width) ---------------- */}
         <Card index={0} icon={BrainCircuit} title="Model performance" subtitle={model ? `${model.version} · trained on ${model.metrics.n_train?.toLocaleString()} samples` : 'Loading model…'}>
           {!model ? <Skeleton className="h-56 w-full" /> : (
             <div className="grid gap-6 lg:grid-cols-[320px_minmax(0,1fr)]">
@@ -130,7 +127,6 @@ export default function RiskAnalysisPage() {
           )}
         </Card>
 
-        {/* ---------------- 2. What-if simulator (full width, below) ---------------- */}
         <Card index={1} icon={SlidersHorizontal} title="What-if simulator" subtitle="Change the conditions — the live model and rule engine respond instantly"
           actions={Object.keys(PRESETS).map((p) => <Button key={p} size="sm" variant="secondary" onClick={() => preset(p)}><FlaskConical className="h-3.5 w-3.5" />{p}</Button>)}>
           <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
@@ -187,7 +183,6 @@ export default function RiskAnalysisPage() {
           </div>
         </Card>
 
-        {/* ---------------- 3. Weather + re-score ---------------- */}
         <div className="grid gap-5 lg:grid-cols-3">
           <Card index={2} icon={Activity} title="Weather API health" subtitle="Open-Meteo · timeout · retries · circuit breaker">
             {!wx ? <Skeleton className="h-40 w-full" /> : (

@@ -1,4 +1,3 @@
-"""Builds optimizer input from the database and stores the resulting plan."""
 from __future__ import annotations
 
 from dataclasses import asdict
@@ -9,7 +8,6 @@ from ..core.auth import CurrentUser
 from ..core.errors import AppError
 from .optimizer import Constraints, IncidentDemand, ResourcePool, derive_demand, optimize
 
-# demand types that belong to NGO relief, not to the officers' pump & crew plan (016)
 PEOPLE_RELIEF = {"relief_kit", "medical_kit"}
 
 
@@ -28,10 +26,7 @@ def create_plan(incident_ids: list[str], constraints: Constraints, user: Current
                    risk_score, risk_level::text, priority, lat, lng, ward_id
             from incidents where id = any(%s::uuid[])""", (incident_ids,))
         assert_wards_in_area(conn, user, [i["ward_id"] for i in incs])
-        # Officers plan only with resources they can see (migration 011): their own
-        # authority's stock, or stock based in their area. Others use the whole city.
         area = officer_area(conn, user)
-        # Only CITY AUTHORITY equipment: NGO stock is allocated by NGO coordinators (migration 016).
         pools = db.fetch_all(conn, """
             select r.id::text, r.resource_type::text, r.quantity_available, r.lat, r.lng, r.organization_id::text, r.name
             from resources r
@@ -58,7 +53,6 @@ def create_plan(incident_ids: list[str], constraints: Constraints, user: Current
                     raise AppError(422, "VALIDATION", f"Invalid demand override {k}={v}")
                 d[k] = int(v)
             d = {k: v for k, v in d.items() if v > 0}
-        # relief for PEOPLE goes to NGO coordinators as community needs, not into the pump & crew plan
         people = {k: d.pop(k) for k in list(d) if k in PEOPLE_RELIEF}
         if people:
             ngo_relief[i["reference_code"]] = people

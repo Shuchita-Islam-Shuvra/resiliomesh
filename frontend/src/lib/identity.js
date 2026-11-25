@@ -1,8 +1,3 @@
-// Identity rules shared by sign-up, the account page and the admin queue.
-// They mirror the database (migration 008) so users get instant feedback; the
-// database is the authority and enforces every one of them again.
-
-// Public mail providers: never an "official" organisation address.
 export const FREEMAIL = new Set([
   'gmail.com', 'googlemail.com', 'yahoo.com', 'yahoo.co.uk', 'yahoo.co.in', 'ymail.com', 'rocketmail.com',
   'hotmail.com', 'outlook.com', 'live.com', 'msn.com', 'icloud.com', 'me.com', 'mac.com', 'aol.com',
@@ -16,11 +11,6 @@ export const emailDomain = (email = '') => (email.trim().toLowerCase().split('@'
 export const domainMatches = (domain, allowed = []) =>
   Boolean(domain) && allowed.some((a) => domain === a.toLowerCase() || domain.endsWith(`.${a.toLowerCase()}`))
 
-/**
- * Why this e-mail cannot be used for the requested staff role (null = fine).
- * @param org       the chosen organisation ({ email_domains }) or null / 'other'
- * @param allOrgs   every public organisation (water resilience officers without a choice)
- */
 export function emailPolicyError(email, role, org, allOrgs = []) {
   const d = emailDomain(email)
   if (!d) return null
@@ -42,7 +32,6 @@ export function emailPolicyError(email, role, org, allOrgs = []) {
   return null
 }
 
-// Bangladeshi mobile numbers only: +8801[3-9]XXXXXXXX (accepts 01…, 8801…, spaces and dashes)
 export function normalizeBdPhone(p = '') {
   const d = String(p).replace(/[^0-9]/g, '')
   if (/^8801[3-9][0-9]{8}$/.test(d)) return `+${d}`
@@ -51,7 +40,6 @@ export function normalizeBdPhone(p = '') {
   return null
 }
 
-// What admins see on each access request (keys come from rm_request_checks()).
 export const CHECK_LABEL = {
   roster: {
     verified: ['ok', 'On staff roster'], id_only: ['warn', 'ID on roster (no e-mail on file)'],
@@ -87,7 +75,6 @@ export const FLAG_LABEL = {
   ngo_transfer: 'moves an NGO Coordinator from another NGO; the old post ends',
 }
 
-// Signals the database attaches to citizen reports (shown to staff only).
 export const TRUST_FLAG_LABEL = {
   phone_unverified: 'Phone not verified',
   new_account: 'New account (< 24 h)',

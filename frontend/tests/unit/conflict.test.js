@@ -1,11 +1,11 @@
-// A04 — conflict resolution policy for edits made while offline
 import { describe, expect, it } from 'vitest'
 import { canTransition, resolveTaskConflict, transitionPath } from '../../src/offline/conflict'
 
 describe('transitionPath', () => {
   it('finds a valid multi-step path', () => {
     expect(transitionPath('assigned', 'completed')).toEqual(['in_progress', 'completed'])
-    expect(transitionPath('accepted', 'failed')).toEqual(['in_progress', 'failed'])
+    expect(transitionPath('accepted', 'failed')).toEqual(['failed'])
+    expect(transitionPath('assigned', 'failed')).toEqual(['accepted', 'failed'])
   })
   it('returns null when impossible (terminal states)', () => {
     expect(transitionPath('completed', 'in_progress')).toBeNull()
@@ -43,5 +43,7 @@ describe('resolveTaskConflict', () => {
     expect(canTransition('assigned', 'in_progress')).toBe(true)
     expect(canTransition('assigned', 'completed')).toBe(false)
     expect(canTransition('completed', 'completed')).toBe(true)
+    expect(canTransition('accepted', 'failed')).toBe(true)
+    expect(canTransition('accepted', 'completed')).toBe(false)
   })
 })

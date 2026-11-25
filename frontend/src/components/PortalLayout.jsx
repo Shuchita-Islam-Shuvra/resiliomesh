@@ -4,10 +4,6 @@ import { Link } from 'react-router-dom'
 import RoleCapsule from './RoleCapsule'
 import { ROLE_BY_KEY } from '../lib/roles'
 
-/**
- * Centered auth page that mirrors the home page's "Choose your portal" section:
- * heading → capsule role bar → rounded card holding the role's form.
- */
 export default function PortalLayout({
   role = 'citizen', onRoleChange, eyebrow, heading, blurb, title, subtitle, headerLink, children,
 }) {

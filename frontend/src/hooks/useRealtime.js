@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 
-/** Subscribe to postgres_changes on one or more tables; calls onChange(payload). */
 export function useRealtime(tables, onChange, { filter } = {}) {
   const cb = useRef(onChange)
   cb.current = onChange
@@ -18,7 +17,6 @@ export function useRealtime(tables, onChange, { filter } = {}) {
   }, [key, filter])
 }
 
-/** Presence: who else is looking at this record right now (A01). */
 export function usePresence(room, me) {
   const [peers, setPeers] = useState([])
   useEffect(() => {
@@ -36,7 +34,6 @@ export function usePresence(room, me) {
   return peers
 }
 
-/** Debounced refetch helper for realtime-driven lists. */
 export function useDebouncedCallback(fn, ms = 400) {
   const t = useRef()
   const f = useRef(fn)

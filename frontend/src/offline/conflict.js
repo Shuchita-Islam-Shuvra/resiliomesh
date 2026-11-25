@@ -1,21 +1,10 @@
-// Pure conflict-resolution policy for offline task edits (unit tested).
-//
-// Policy (documented in README):
-//  1. Server is terminal (completed / cancelled)  -> SERVER WINS. A cancelled task must
-//     not be resurrected by a stale offline device; local notes are preserved in the log.
-//  2. Same status on both sides                    -> MERGE NOTES (append, no duplication).
-//  3. Local progress is further along the lifecycle -> CLIENT WINS (the field worker is the
-//     source of truth for physical progress). Replay along a valid transition path.
-//  4. Local 'failed' while server still active     -> CLIENT WINS (failure must surface).
-//  5. Otherwise (server further ahead)             -> SERVER WINS.
-
 export const LIFECYCLE = ['pending', 'assigned', 'accepted', 'in_progress', 'completed']
 export const TERMINAL = ['completed', 'cancelled']
 
 const ALLOWED = {
   pending: ['assigned', 'cancelled'],
   assigned: ['accepted', 'in_progress', 'cancelled'],
-  accepted: ['in_progress', 'cancelled'],
+  accepted: ['in_progress', 'failed', 'cancelled'],
   in_progress: ['completed', 'failed', 'cancelled'],
   failed: ['assigned', 'in_progress'],
   completed: [],
@@ -24,7 +13,6 @@ const ALLOWED = {
 
 export const canTransition = (from, to) => from === to || (ALLOWED[from] || []).includes(to)
 
-/** Shortest valid path of statuses from `from` to `to` (exclusive of from). BFS. */
 export function transitionPath(from, to) {
   if (from === to) return []
   const queue = [[from, []]]

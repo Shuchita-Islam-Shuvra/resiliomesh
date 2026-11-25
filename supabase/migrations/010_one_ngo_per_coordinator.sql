@@ -1,36 +1,3 @@
--- =====================================================================
--- ResilioMesh — 010 one person, one NGO coordinator post
--- ---------------------------------------------------------------------
--- How areas and NGOs fit together:
---   * Water Resilience Officers are bound to Dhaka North (DNCC) or Dhaka South (DSCC)
---     through their authority (migration 009).
---   * NGO Coordinators and Field Workers are NOT split by area. They serve the
---     whole city, because relief follows the flood and not the corporation line.
---
--- This migration matches how NGOs normally staff their work: a coordinator is
--- employed by ONE NGO. The same person must not hold coordinator posts at two
--- NGOs, or two coordinator accounts at the same NGO.
---
---   * The person is identified by their Bangladeshi mobile number. SIMs are
---     NID-registered in Bangladesh, and staff sign-up already requires one
---     (an SMS code confirms it once an SMS provider is configured).
---   * While one account holds an active NGO Coordinator post, no other active
---     staff account may use the same mobile. That covers a second coordinator
---     post, or the same person also working as a field worker or officer
---     somewhere else.
---   * An NGO Coordinator request needs a mobile number on the account.
---   * Moving a coordinator to a different NGO is a TRANSFER (flag `ngo_transfer`).
---     It needs two admins and a written reason. A profile holds exactly one
---     organisation, so the old post ends when the new one starts.
---   * A trigger on profiles enforces all of this, backed by a partial unique
---     index. No path (approval, admin proposal, SQL editor, backend) can create
---     a second post.
---
--- Run after 009. Re-runnable. If you re-run 008, run this file again
--- (it replaces rm_request_checks from 008).
--- =====================================================================
-
--- ---------- 0. Earlier migrations must be in place ----------------------
 do $$
 declare missing text[] := '{}';
 begin
@@ -49,10 +16,6 @@ begin
   end if;
 end $$;
 
--- ---------- 1. Who else holds a post with this mobile? -------------------
--- Returns a short description of the conflicting post, or null.
--- VOLATILE on purpose: inside the trigger it must see rows committed by a
--- concurrent transaction after the advisory lock below was granted.
 create or replace function public.rm_ngo_seat_conflict(p_user uuid, p_role app_role, p_phone text)
 returns text
 language plpgsql volatile security definer set search_path = public as $$
@@ -79,7 +42,6 @@ begin
 end $$;
 revoke execute on function public.rm_ngo_seat_conflict(uuid, app_role, text) from anon, authenticated, public;
 
--- ---------- 2. Hard guarantee on profiles --------------------------------
 create or replace function public.rm_ngo_seat_guard() returns trigger
 language plpgsql security definer set search_path = public as $$
 declare v_msg text;
@@ -92,26 +54,21 @@ begin
      and new.is_active = old.is_active then
     return new;
   end if;
-  -- serialise concurrent grants for the same mobile
   perform pg_advisory_xact_lock(hashtextextended('rm_staff_phone:' || new.phone, 0));
   v_msg := rm_ngo_seat_conflict(new.id, new.role, new.phone);
   if v_msg is not null then
     if rm_is_system() or coalesce(rm_role()::text, '') = 'admin' then
       raise exception 'CONFLICT: %', v_msg using errcode = '23505';
     end if;
-    -- do not tell non-admins whose number it is
     raise exception 'CONFLICT: this mobile number is already registered to another staff account' using errcode = '23505';
   end if;
   return new;
 end $$;
 
--- named after trg_aa_profile_normalize (008) so the phone is already normalised
 drop trigger if exists trg_ngo_seat_guard on profiles;
 create trigger trg_ngo_seat_guard before insert or update of role, phone, is_active on profiles
   for each row execute function rm_ngo_seat_guard();
 
--- Backstop for two coordinator posts on one mobile. If old data already breaks
--- the rule, list it and skip the index (the trigger still blocks new cases).
 do $$
 declare d record; n int := 0;
 begin
@@ -131,12 +88,6 @@ begin
   end if;
 end $$;
 
--- ---------- 3. Access-request checks (008 + NGO post rules) ---------------
--- Same as 008 §6, plus:
---   blocker `ngo_seat_taken` : the mobile already holds a conflicting post
---   blocker `phone_missing`  : NGO Coordinator request without a mobile number
---   flag    `ngo_transfer`   : an active NGO Coordinator asks to move to another NGO
---   key     `ngo_seat`       : the conflict text, for the admin screen
 create or replace function public.rm_request_checks(r role_requests, p_org uuid default null, p_reviewer uuid default null)
 returns jsonb
 language plpgsql stable security definer set search_path = public as $$
@@ -156,7 +107,6 @@ begin
   v_domain  := rm_email_domain(v_email);
   v_mail_ok := p.email_verified_at is not null;
 
-  -- e-mail domain
   if o.id is not null and cardinality(o.email_domains) > 0 and rm_domain_matches(v_domain, o.email_domains) then
     v_dstatus := 'official';
   elsif o.id is null and r.requested_role = 'city_officer' and exists (
@@ -173,7 +123,6 @@ begin
     v_email_ok := false; v_email_msg := 'NGO coordinators must use an organisation e-mail, not a public mail provider';
   end if;
 
-  -- staff roster
   v_emp := nullif(upper(btrim(coalesce(r.employee_id, p.employee_id))), '');
   if r.requested_role <> 'admin' then
     if v_emp is not null then
@@ -193,7 +142,6 @@ begin
     v_roster_by := rr.uploaded_by;
   end if;
 
-  -- NGOAB registration
   if r.requested_role = 'ngo_coordinator' then
     v_reg := nullif(upper(btrim(coalesce(r.registration_no, o.ngoab_registration_no))), '');
     if v_reg is null then v_ngo := 'missing';
@@ -211,14 +159,12 @@ begin
   end if;
   select count(*) into v_docs from role_request_documents d where d.request_id = r.id;
 
-  -- one person, one NGO Coordinator post (010)
   v_seat := rm_ngo_seat_conflict(r.user_id, r.requested_role, p.phone);
   if r.requested_role = 'ngo_coordinator' and p.role = 'ngo_coordinator' and p.is_active
      and p.organization_id is not null and p.organization_id is distinct from v_org then
     select name into v_transfer_from from organizations where id = p.organization_id;
   end if;
 
-  -- red flags: allowed only with two approvals and a written note
   if v_dstatus <> 'official' and r.requested_role <> 'admin' then flags := array_append(flags, 'email_domain'); end if;
   if v_roster not in ('verified','id_only','n/a') then flags := array_append(flags, 'roster'); end if;
   if v_ngo not in ('verified','n/a') then flags := array_append(flags, 'ngoab'); end if;
@@ -230,7 +176,6 @@ begin
   end if;
   if v_transfer_from is not null then flags := array_append(flags, 'ngo_transfer'); end if;
 
-  -- hard blockers
   if r.requested_role <> 'admin' and v_org is null then blockers := array_append(blockers, 'organisation_missing'); end if;
   if o.id is not null and not (
        (r.requested_role = 'city_officer'    and o.type = 'city_authority') or

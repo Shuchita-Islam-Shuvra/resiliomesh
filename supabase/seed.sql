@@ -1,9 +1,3 @@
--- =====================================================================
--- ResilioMesh — reference seed data (run AFTER migrations 001-005)
--- Demo users + sample incidents are created by scripts/seed_demo.py
--- Organisation names are fictional demo entities.
--- =====================================================================
-
 insert into organizations (id, name, type, contact_phone) values
   ('11111111-1111-1111-1111-111111111101', 'North Dhaka Drainage Authority',  'city_authority', '+8801700000101'),
   ('11111111-1111-1111-1111-111111111102', 'South Dhaka Drainage Authority',  'city_authority', '+8801700000102'),
@@ -12,8 +6,6 @@ insert into organizations (id, name, type, contact_phone) values
   ('11111111-1111-1111-1111-111111111105', 'ResilioMesh Platform Ops',        'system',         '+8801700000105')
 on conflict (id) do nothing;
 
--- Dhaka wards / localities (approximate centroids). Hydrological attributes
--- are modelled estimates for the demo (see README > Data & limitations).
 insert into wards (id, name, city_corporation, lat, lng, population, area_km2, elevation_m, impervious_pct, drainage_capacity_mm_hr, historical_events_10y) values
   ('DNCC-01','Uttara Sector 7',    'DNCC',23.8759,90.3795,182000, 4.10, 7.8, 71, 38, 14),
   ('DNCC-02','Mirpur 10',          'DNCC',23.8069,90.3687,265000, 3.20, 6.1, 86, 26, 41),
@@ -37,7 +29,6 @@ insert into wards (id, name, city_corporation, lat, lng, population, area_km2, e
   ('DSCC-10','Kamrangirchar',      'DSCC',23.7130,90.3720,214000, 3.70, 3.9, 72, 16, 43)
 on conflict (id) do nothing;
 
--- Drainage assets
 insert into drainage_assets (code, name, asset_type, ward_id, owner_org_id, lat, lng, capacity_m3s, condition_score, status, last_maintained_at) values
   ('DR-MRP-001','Mirpur 10 Roundabout Box Culvert','culvert','DNCC-02','11111111-1111-1111-1111-111111111101',23.8072,90.3684,4.5,38,'blocked',  now()-interval '210 days'),
   ('DR-MRP-002','Begum Rokeya Sarani Storm Drain','drain','DNCC-02','11111111-1111-1111-1111-111111111101',23.8001,90.3702,2.2,55,'degraded',   now()-interval '120 days'),
@@ -66,7 +57,6 @@ insert into drainage_assets (code, name, asset_type, ward_id, owner_org_id, lat,
   ('CN-KMR-001','Kamrangirchar Embankment Drain','canal','DSCC-10','11111111-1111-1111-1111-111111111102',23.7120,90.3700,5.0,27,'blocked',now()-interval '500 days')
 on conflict (code) do nothing;
 
--- Resource inventory (city authorities own pumps & crews, NGOs own relief)
 insert into resources (organization_id, resource_type, name, unit, quantity_total, quantity_available, base_ward_id, lat, lng) values
   ('11111111-1111-1111-1111-111111111101','pump','North Mobile Dewatering Pumps (6")','pump',8,8,'DNCC-05',23.7602,90.3990),
   ('11111111-1111-1111-1111-111111111101','pump','Mirpur Depot Portable Pumps','pump',4,4,'DNCC-02',23.8050,90.3690),
@@ -83,11 +73,6 @@ insert into resources (organization_id, resource_type, name, unit, quantity_tota
   ('11111111-1111-1111-1111-111111111104','medical_kit','First-Aid Kit','kit',150,150,'DNCC-07',23.7806,90.4265)
 on conflict (organization_id, name) do nothing;
 
--- ---------------------------------------------------------------------
--- Historical flood events: ~10 years x 20 wards, deterministic synthetic
--- record generated from ward vulnerability + monsoon seasonality.
--- (~12-18k rows; /api/analytics/import can load 100k+ more for A08.)
--- ---------------------------------------------------------------------
 select setseed(0.42);
 insert into historical_flood_events (ward_id, event_date, rainfall_mm, max_depth_cm, duration_hr, households_affected, source, record_hash)
 select w.id, d::date,
@@ -108,7 +93,6 @@ cross join lateral (
 where rain > w.drainage_capacity_mm_hr * 1.15
 on conflict (record_hash) do nothing;
 
--- initial ward risk baseline (refreshed by backend /api/risk/wards/refresh)
 update wards set
   current_risk_score = least(95, round((historical_events_10y * 1.1 + (100 - drainage_capacity_mm_hr) * 0.35 + impervious_pct * 0.15)::numeric, 1)),
   risk_updated_at = now();

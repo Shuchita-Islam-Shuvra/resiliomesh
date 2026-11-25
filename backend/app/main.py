@@ -86,8 +86,6 @@ SECURITY_HEADERS = {
 
 
 def mount_frontend(app: FastAPI, dist: Path) -> None:
-    """Serve the built React SPA from the same service (one deploy, one URL, no CORS).
-    Registered after the API router, so /api/*, /health and /docs always win."""
     dist = dist.resolve()
     index = dist / "index.html"
     if (dist / "assets").is_dir():
@@ -99,7 +97,7 @@ def mount_frontend(app: FastAPI, dist: Path) -> None:
         for k, v in SECURITY_HEADERS.items():
             res.headers.setdefault(k, v)
         if request.url.path.startswith("/assets/"):
-            res.headers["Cache-Control"] = "public, max-age=31536000, immutable"  # hashed file names
+            res.headers["Cache-Control"] = "public, max-age=31536000, immutable"
         return res
 
     @app.get("/{full_path:path}", include_in_schema=False)
@@ -109,7 +107,6 @@ def mount_frontend(app: FastAPI, dist: Path) -> None:
         f = (dist / full_path).resolve()
         if full_path and f.is_file() and dist in f.parents:
             return FileResponse(f, headers={"Cache-Control": "no-cache"} if f.name == "sw.js" else None)
-        # client-side routes (/dashboard, /incidents/123, ...) all load the SPA shell
         return FileResponse(index, headers={"Cache-Control": "no-cache"})
 
     log.info("serving frontend from %s", dist)

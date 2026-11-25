@@ -10,7 +10,6 @@ export default function ProtectedRoute({ roles, children }) {
   if (loading) return <Spinner label="Checking session…" />
   if (!session) return <Navigate to="/login" replace state={{ from: loc.pathname }} />
   if (!profile) return <Spinner label="Loading profile…" />
-  // staff account whose session has not passed the server-side ID / MFA step yet
   if (security?.gate) return <SessionGate />
   if (roles && !roles.includes(profile.role)) {
     return (

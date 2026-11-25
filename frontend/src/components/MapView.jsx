@@ -11,10 +11,8 @@ export const DHAKA_CENTER = [23.775, 90.395]
 export const UNASSESSED_COLOR = '#64748b'
 export const ASSET_COLOR = { operational: '#0369a1', degraded: '#d97706', blocked: '#b91c1c' }
 
-// radius of a ward's circle in metres (approximates the ward from its area)
 export const wardRadius = (w) => Math.sqrt((w.area_km2 || 2.5) * 1e6 / Math.PI) * 0.85
 
-// Map = street map; Satellite = aerial imagery with place names on top
 const BASEMAPS = {
   map: [{ url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', subdomains: 'abc',
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors' }],
@@ -25,7 +23,6 @@ const BASEMAPS = {
   ],
 }
 
-// drainage assets are small squares so they never look like report dots
 const assetIcon = (status) => L.divIcon({
   className: '',
   iconSize: [12, 12],
@@ -44,7 +41,6 @@ function FlyTo({ center }) {
   return null
 }
 
-/** Smoothly frames the focused ward, or the whole area when nothing is focused. */
 function FocusController({ focus, home }) {
   const map = useMap()
   useEffect(() => {
@@ -54,24 +50,18 @@ function FocusController({ focus, home }) {
   return null
 }
 
-/**
- * Generic map: wards (risk circles), incidents (round markers), assets (squares),
- * resources, picker. A Water Resilience Officer's map opens on their own area (Dhaka
- * North / South) and cannot be panned out of it; pass lockToArea={false} to show
- * all of Dhaka. `focusWard` (a ward object) zooms to that ward and dims the rest.
- * `basemap` is 'map' (streets) or 'satellite'.
- */
 export default function MapView({
   wards = [], incidents = [], assets = [], resources = [], pick, onPick, flyTo,
   height = 'h-[60vh]', onIncidentClick, onWardClick, focusWard, showWardRadius = true, lockToArea = true, basemap = 'satellite',
+  area: areaProp,
 }) {
-  const { area } = useAuth() || {}
+  const { area: authArea } = useAuth() || {}
+  const area = areaProp !== undefined ? areaProp : authArea
   const bounds = lockToArea ? AREA_BOUNDS[area] : null
-  // the other city corporation is shaded out on an area-bound user's map
   const wardAreas = useWardAreas()
   const otherCells = useMemo(() => (bounds && wardAreas.length
     ? wardCells(wardAreas, [[bounds[0][0] - 0.2, bounds[0][1] - 0.2], [bounds[1][0] + 0.2, bounds[1][1] + 0.2]])
-      .filter((c) => c.city_corporation !== area && c.ring.length > 2).map((c) => [c.ring])   // multipolygon: one polygon per cell
+      .filter((c) => c.city_corporation !== area && c.ring.length > 2).map((c) => [c.ring])
     : []), [bounds, wardAreas, area])
   const otherArea = Object.keys(AREA_LABEL).find((k) => k !== area)
   const home = useMemo(() => bounds || DHAKA_BOUNDS, [bounds])

@@ -15,8 +15,6 @@
   --color-ink-800: #111c33;
 }
 
-/* The app shell owns scrolling: html/body never scroll, so the dark sidebar
-   can never end mid-page and reveal a white strip. */
 html, body, #root { height: 100%; }
 body {
   @apply bg-slate-50 text-slate-800 antialiased;
@@ -27,21 +25,15 @@ body {
 }
 
 :focus-visible { outline: 2px solid var(--color-brand-600); outline-offset: 2px; }
-/* form fields draw their own focus ring (ring-2) - no second outline */
 input:focus-visible, select:focus-visible, textarea:focus-visible { outline: none; }
 
 .leaflet-container { font-family: inherit; z-index: 0; }
 .skip-link { @apply sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 focus:bg-white focus:px-3 focus:py-2 focus:rounded-md focus:shadow; }
 
-/* thin, unobtrusive scrollbars */
 * { scrollbar-width: thin; scrollbar-color: rgb(148 163 184 / 0.5) transparent; }
 *::-webkit-scrollbar { width: 8px; height: 8px; }
 *::-webkit-scrollbar-thumb { background: rgb(148 163 184 / 0.45); border-radius: 9999px; }
 
-/* sidebar hover (matches the reference video): a solid block slides in from the left
-   with a soft, see-through leading edge, and slides back out to the left (fading)
-   when the pointer moves on. The block is wider than the row by --edge so the soft
-   edge is clipped once it is fully in. */
 .nav-fill { --edge: 36px; --fill: var(--color-brand-700); position: absolute; top: 0; bottom: 0; left: 0; pointer-events: none;
   width: calc(100% + var(--edge));
   background: linear-gradient(90deg,
@@ -50,11 +42,10 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: non
     transparent 100%);
   transform: translateX(-100%); opacity: 0.55;
   transition: transform 240ms cubic-bezier(0.4, 0, 0.2, 1), opacity 240ms ease; }
-.nav-fill-danger { --fill: #e11d48; } /* rose-600: sign out */
+.nav-fill-danger { --fill: #e11d48; }
 .group:hover .nav-fill, .group:focus-visible .nav-fill { transform: translateX(0); opacity: 1;
   transition: transform 260ms cubic-bezier(0.25, 0.8, 0.25, 1), opacity 120ms ease; }
 
-/* recharts: keep tooltips readable and charts from forcing overflow */
 .recharts-wrapper, .recharts-surface { max-width: 100%; }
 .recharts-default-tooltip { border-radius: 10px !important; border: 1px solid #e2e8f0 !important; box-shadow: 0 8px 24px rgb(15 23 42 / 0.08); }
 
@@ -70,6 +61,5 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: non
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
 }
 
-/* horizontally scrollable capsule bars without a visible scrollbar */
 .no-scrollbar { scrollbar-width: none; }
 .no-scrollbar::-webkit-scrollbar { display: none; }

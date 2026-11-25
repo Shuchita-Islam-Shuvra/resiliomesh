@@ -1,10 +1,3 @@
-"""Identity verification & anti-impersonation (migration 008) against a REAL database.
-
-Every check here goes through PostgREST-equivalent privileges (role `authenticated`
-+ JWT claims), i.e. exactly what someone calling the Supabase API directly gets.
-
-    TEST_DATABASE_URL=postgresql://... pytest tests/test_db_identity.py -v
-"""
 import json
 import uuid
 
@@ -28,13 +21,11 @@ def uniq(prefix):
 
 
 def bd_mobile():
-    """Random +8801XXXXXXXXX (auth.users.phone is unique, tests must be re-runnable)."""
     n = uuid.uuid4().int
     return f"8801{3 + n % 7}{n // 7 % 10**8:08d}"
 
 
 def staff(role, org=None, employee_id=None, *, verified=True, email=None):
-    """A staff account that is signed in (live auth session); optionally staff-ID verified."""
     with raw() as c:
         uid = new_auth_user(c, role, email=email)
         c.execute("update profiles set role=%s, organization_id=%s, employee_id=%s where id=%s",
@@ -59,7 +50,7 @@ def eff_role(uid, **kw):
 
 def report(uid, lat=None, lng=None, ward=None, headers=None, **extra):
     if lat is None:
-        lat, lng = random_dhaka_point()                     # spread out: avoid the 150 m geo-duplicate rule
+        lat, lng = random_dhaka_point()
     lat_j = lat
     with raw() as c:
         ward = ward or nearest_ward(c, lat_j, lng)
@@ -76,12 +67,11 @@ def admins():
     return a1, a2
 
 
-# ------------------------------------------------------------------ 1. staff ID is checked on the server
 def test_password_only_session_gets_citizen_privileges():
     officer = staff("city_officer", SOUTH, uniq("DSCC"), verified=False)
     assert eff_role(officer) == "citizen"
     with as_user(officer) as c:
-        assert c.execute("select count(*) n from resources").fetchone()["n"] == 0      # staff-only table hidden
+        assert c.execute("select count(*) n from resources").fetchone()["n"] == 0
         with pytest.raises(psycopg.Error, match="FORBIDDEN"):
             c.execute("select analytics_dashboard(30, null)")
 
@@ -99,7 +89,7 @@ def test_staff_id_verified_server_side_unlocks_role():
     assert wrong_role["code"] == "ROLE_MISMATCH" and wrong_role["actual_role"] == "city_officer"
     assert ok["ok"] is True
     assert eff_role(officer) == "city_officer"
-    with raw() as c:        # every attempt is recorded
+    with raw() as c:
         rows = c.execute("select succeeded, reason from staff_login_attempts where user_id=%s order by id", (officer,)).fetchall()
     assert [(r["succeeded"], r["reason"]) for r in rows] == [(False, "ID_MISMATCH"), (True, None)]
 
@@ -136,18 +126,18 @@ def test_verified_session_cannot_be_borrowed_by_another_user():
 def test_sign_out_expiry_and_role_change_end_staff_privileges(admins):
     officer = staff("city_officer", SOUTH, uniq("DSCC"))
     assert eff_role(officer) == "city_officer"
-    with raw() as c:                                   # session expires (shift over)
+    with raw() as c:
         c.execute("update staff_sessions set expires_at = now() - interval '1 minute' where user_id=%s", (officer,))
     assert eff_role(officer) == "citizen"
     with raw() as c:
         verify_staff_session(c, officer)
     assert eff_role(officer) == "city_officer"
-    with as_user(officer) as c:                        # explicit sign-out
+    with as_user(officer) as c:
         c.execute("select rm_end_staff_session()")
     assert eff_role(officer) == "citizen"
     with raw() as c:
         verify_staff_session(c, officer)
-        c.execute("delete from auth.sessions where id=%s", (SESSIONS[officer],))     # Supabase revoked the session
+        c.execute("delete from auth.sessions where id=%s", (SESSIONS[officer],))
     assert eff_role(officer) == "citizen"
 
 
@@ -158,14 +148,13 @@ def test_authenticator_app_requires_aal2():
     assert eff_role(officer, aal="aal1") == "citizen"
     assert eff_role(officer, aal="aal2") == "city_officer"
     admin = staff("admin", employee_id=uniq("ADM"))
-    with settings(mfa_required_roles="{admin}"):       # role-wide MFA policy
+    with settings(mfa_required_roles="{admin}"):
         assert eff_role(admin, aal="aal1") == "citizen"
         assert eff_role(admin, aal="aal2") == "admin"
     assert eff_role(admin, aal="aal1") == "admin"
 
 
 def test_backend_api_sees_the_same_effective_role(monkeypatch):
-    """The FastAPI backend must not be a bypass: it resolves the role per JWT session too."""
     monkeypatch.setenv("DATABASE_URL", DSN)
     from app.core import auth, config, db
     config.get_settings.cache_clear()
@@ -187,7 +176,6 @@ def test_backend_api_sees_the_same_effective_role(monkeypatch):
         config.get_settings.cache_clear()
 
 
-# ------------------------------------------------------------------ 2. phones: Bangladesh only + OTP
 def test_phone_must_be_bangladeshi_and_is_normalised():
     cz = citizen()
     with as_user(cz) as c:
@@ -210,12 +198,12 @@ def test_phone_verified_flag_only_comes_from_otp():
     with pytest.raises(psycopg.Error, match="FORBIDDEN"):
         with as_user(cz) as c:
             c.execute("update profiles set phone_verified_at = now() where id=%s", (cz,))
-    with raw() as c:   # what Supabase Auth does after the SMS code is confirmed
+    with raw() as c:
         phone = bd_mobile()
         c.execute("update auth.users set phone=%s, phone_confirmed_at=now() where id=%s", (phone, cz))
         p = c.execute("select phone, phone_verified_at from profiles where id=%s", (cz,)).fetchone()
     assert p["phone"] == "+" + phone and p["phone_verified_at"] is not None
-    with as_user(cz) as c:   # changing the number makes it unverified again
+    with as_user(cz) as c:
         c.execute("update profiles set phone=%s where id=%s", ("+" + bd_mobile(), cz))
         assert c.execute("select phone_verified_at from profiles where id=%s", (cz,)).fetchone()["phone_verified_at"] is None
 
@@ -230,13 +218,12 @@ def test_verified_phone_required_to_report_when_enabled():
         assert report(cz)["status"] in ("reported", "duplicate")
 
 
-# ------------------------------------------------------------------ 3. reports: area, ward, rate, signals
 def test_report_must_be_inside_dhaka_and_match_its_ward():
     cz = citizen()
     with pytest.raises(psycopg.Error, match="Dhaka service area"):
-        report(cz, lat=22.33, lng=91.83, ward="DSCC-02")                 # Chattogram
+        report(cz, lat=22.33, lng=91.83, ward="DSCC-02")
     with pytest.raises(psycopg.Error, match="km from"):
-        report(cz, lat=23.8759, lng=90.3795, ward="DSCC-10")             # Uttara pin, Kamrangirchar ward
+        report(cz, lat=23.8759, lng=90.3795, ward="DSCC-10")
 
 
 def test_citizen_report_rate_limit():
@@ -263,7 +250,6 @@ def test_trust_flags_are_computed_by_the_server():
             c.execute("update incidents set lat=22.3 where id=%s", (inc["id"],))
 
 
-# ------------------------------------------------------------------ 4. sign-up: official domains
 def signup(c, email, role, org=None, **meta):
     return new_auth_user(c, "applicant", email=email, meta={"requested_role": role, "organization_id": org or "", **meta})
 
@@ -272,7 +258,7 @@ def test_city_officer_needs_city_corporation_email():
     with raw() as c:
         with pytest.raises(psycopg.Error, match="city corporation e-mail"):
             signup(c, f"{uuid.uuid4().hex[:8]}@gmail.com", "city_officer", SOUTH, employee_id=uniq("DSCC"), designation="Engineer")
-        with pytest.raises(psycopg.Error, match="city corporation e-mail"):     # the other corporation's domain
+        with pytest.raises(psycopg.Error, match="city corporation e-mail"):
             signup(c, f"{uuid.uuid4().hex[:8]}@dncc.gov.bd", "city_officer", SOUTH, employee_id=uniq("DSCC"), designation="Engineer")
         uid = signup(c, f"{uuid.uuid4().hex[:8]}@dscc.gov.bd", "city_officer", SOUTH, employee_id=uniq("DSCC"), designation="Engineer")
         assert c.execute("select count(*) n from role_requests where user_id=%s and status='pending'", (uid,)).fetchone()["n"] == 1
@@ -290,7 +276,6 @@ def test_admin_cannot_put_public_mail_on_org_domains(admins):
             c.execute("update organizations set email_domains='{gmail.com}' where id=%s", (SOUTH,))
 
 
-# ------------------------------------------------------------------ 5. roster / NGOAB / documents / two admins
 def request_of(c, uid):
     return c.execute("select * from role_requests where user_id=%s and status='pending'", (uid,)).fetchone()
 
@@ -314,7 +299,7 @@ def review(admin, rid, approve=True, org=None, note=None):
 def test_city_officer_needs_documents_and_two_different_admins(admins):
     a1, a2 = admins
     emp, email = uniq("DSCC"), f"{uuid.uuid4().hex[:8]}@dscc.gov.bd"
-    with as_user(a1) as c:     # roster lists this officer
+    with as_user(a1) as c:
         c.execute("select rm_import_staff_roster(%s, %s, false)", (SOUTH, json.dumps([{"employee_id": emp, "official_email": email}])))
     with raw() as c:
         uid = signup(c, email, "city_officer", SOUTH, employee_id=emp, designation="Assistant Engineer")
@@ -333,7 +318,6 @@ def test_city_officer_needs_documents_and_two_different_admins(admins):
         review(a2, rid)
     with raw() as c:
         assert c.execute("select role::text r from profiles where id=%s", (uid,)).fetchone()["r"] == "citizen"
-    # a1 uploaded the roster row, so for a1 it is not independent proof: a written justification is required
     with pytest.raises(psycopg.Error, match="roster uploaded by reviewer"):
         review(a1, rid)
     second = review(a1, rid, note="Roster file came from the DSCC HR office, verified by phone")
@@ -352,7 +336,7 @@ def test_roster_uploaded_by_the_reviewer_does_not_count_as_independent(admins):
         uid = signup(c, email, "field_worker", SOUTH, employee_id=emp, team="Drainage crew", ward_id="DSCC-02")
         rid = request_of(c, uid)["id"]
     add_document(uid, rid)
-    assert checks(a2, rid)["required_approvals"] == 1          # independent roster: one approval is enough
+    assert checks(a2, rid)["required_approvals"] == 1
     v1 = checks(a1, rid)
     assert "roster_uploaded_by_reviewer" in v1["flags"] and v1["required_approvals"] == 2
 
@@ -409,7 +393,6 @@ def test_applicant_cannot_see_checks_or_add_documents_to_others(admins):
                       (rid, f"{other}/x.pdf"))
 
 
-# ------------------------------------------------------------------ 6. admins cannot grant alone
 def test_admin_cannot_promote_directly_but_can_revoke(admins):
     a1, a2 = admins
     cz = citizen()
@@ -420,7 +403,7 @@ def test_admin_cannot_promote_directly_but_can_revoke(admins):
     with pytest.raises(psycopg.Error, match="second admin"):
         with as_user(a1) as c:
             c.execute("update profiles set organization_id=%s where id=%s", (NORTH, officer))
-    with as_user(a1) as c:          # revoking is always allowed for one admin (fail-safe)
+    with as_user(a1) as c:
         c.execute("update profiles set role='citizen' where id=%s", (officer,))
     assert eff_role(officer) == "citizen"
 
@@ -439,7 +422,6 @@ def test_admin_proposal_needs_a_second_admin(admins):
     assert review(a2, rid)["status"] == "approved"
     with raw() as c:
         assert c.execute("select role::text r from profiles where id=%s", (cz,)).fetchone()["r"] == "admin"
-    # the new admin still has to pass the staff-ID step on their own session
     with raw() as c:
         open_session(c, cz)
     assert eff_role(cz) == "citizen"
@@ -459,3 +441,54 @@ def test_only_admins_touch_registries():
         with pytest.raises(psycopg.Error, match="permission denied"):
             with as_user(officer) as c:
                 c.execute(sql)
+
+
+def _reviewer():
+    uid = staff("admin", employee_id=uniq("ADM"))
+    with raw() as c:
+        c.execute("update profiles set admin_scope='reviewer' where id=%s", (uid,))
+    return uid
+
+
+def test_reviewer_runs_access_but_not_platform_setup(admins):
+    owner, _ = admins
+    rev = _reviewer()
+    row = '[{"employee_id":"%s","full_name":"Roster Test","role":"field_worker"}]' % uniq("FW")
+    with pytest.raises(psycopg.Error, match="system owner"):
+        with as_user(rev) as c:
+            c.execute("select rm_import_staff_roster(%s, %s::jsonb, false)", (SOUTH, row))
+    with pytest.raises(psycopg.Error, match="system owner"):
+        with as_user(rev) as c:
+            c.execute("insert into staff_roster(organization_id, employee_id, full_name) values (%s,%s,'x')", (SOUTH, uniq("FW")))
+    with as_user(rev) as c:
+        assert c.execute("select count(*) n from staff_roster").fetchone()["n"] > 0
+        assert c.execute("update organizations set email_domains=email_domains where id=%s", (SOUTH,)).rowcount == 0
+        assert c.execute("select count(*) n from audit_logs").fetchone()["n"] > 0
+    with as_user(owner) as c:
+        assert c.execute("select rm_import_staff_roster(%s, %s::jsonb, false) r", (SOUTH, row)).fetchone()["r"]["inserted"] == 1
+        assert c.execute("update organizations set email_domains=email_domains where id=%s", (SOUTH,)).rowcount == 1
+
+
+def test_no_admin_can_change_their_own_duty(admins):
+    owner, _ = admins
+    rev = _reviewer()
+    for who, scope in ((rev, "owner"), (owner, "reviewer")):
+        with pytest.raises(psycopg.Error, match="platform team"):
+            with as_user(who) as c:
+                c.execute("update profiles set admin_scope=%s where id=auth.uid()", (scope,))
+    with pytest.raises(psycopg.Error, match="platform team"):
+        with as_user(owner) as c:
+            c.execute("update profiles set admin_scope='owner' where id=%s", (rev,))
+
+
+def test_two_person_rule_still_works_across_duties_and_new_admins_start_as_reviewer(admins):
+    owner, _ = admins
+    rev = _reviewer()
+    cz = citizen()
+    with as_user(rev) as c:
+        rid = c.execute("select rm_admin_propose_role_change(%s,'admin',null,%s,'Night-shift access reviewer') r",
+                        (cz, uniq("ADM"))).fetchone()["r"]["request_id"]
+    assert review(owner, rid)["status"] == "approved"
+    with raw() as c:
+        p = c.execute("select role::text r, admin_scope s from profiles where id=%s", (cz,)).fetchone()
+    assert p == {"r": "admin", "s": "reviewer"}

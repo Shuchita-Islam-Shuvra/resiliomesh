@@ -1,4 +1,3 @@
-"""Sliding-window rate limiter (per bearer token / client IP)."""
 from __future__ import annotations
 
 import hashlib
@@ -36,7 +35,6 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self.limiter = limiter
 
     async def dispatch(self, request: Request, call_next):
-        # only the API is limited; website files (JS/CSS chunks) must not use up a visitor's quota
         if not request.url.path.startswith("/api") or request.method == "OPTIONS":
             return await call_next(request)
         auth = request.headers.get("authorization", "")

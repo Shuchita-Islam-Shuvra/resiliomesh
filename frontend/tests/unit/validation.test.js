@@ -1,4 +1,3 @@
-// M06 / M07 — input validation mirrors DB constraints
 import { describe, expect, it } from 'vitest'
 import { validateNeed, validateRegister, validateReport, validateResource, validateSignIn } from '../../src/lib/validation'
 import { errorMessage } from '../../src/lib/errors'

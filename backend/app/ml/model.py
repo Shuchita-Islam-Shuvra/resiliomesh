@@ -1,4 +1,3 @@
-"""XGBoost risk model with SHAP-style per-feature contributions (explainable AI)."""
 from __future__ import annotations
 
 import json
@@ -22,7 +21,6 @@ class RiskModel:
         self.metrics = metrics or {}
         self.version = MODEL_VERSION
 
-    # ---------------------------------------------------------------
     @classmethod
     def train(cls, df: pd.DataFrame, seed: int = 7) -> "RiskModel":
         df = df.drop_duplicates()
@@ -61,12 +59,11 @@ class RiskModel:
         metrics = json.loads(meta_path.read_text()).get("metrics", {}) if meta_path.exists() else {}
         return cls(booster, metrics)
 
-    # ---------------------------------------------------------------
     def predict(self, raw_features: dict) -> dict:
         feats = clean_features(raw_features)
         dm = xgb.DMatrix(pd.DataFrame([feats], columns=FEATURES).astype(float), feature_names=FEATURES)
         score = float(np.clip(self.booster.predict(dm)[0], 0, 100))
-        contribs = self.booster.predict(dm, pred_contribs=True)[0]   # SHAP values (+ bias last)
+        contribs = self.booster.predict(dm, pred_contribs=True)[0]
         bias = float(contribs[-1])
         items = [
             {"feature": f, "label": FEATURE_LABELS[f], "value": feats[f], "contribution": round(float(c), 2)}
@@ -81,7 +78,6 @@ _lock = threading.Lock()
 
 
 def get_model(path: str, csv_path: str | None = None) -> RiskModel:
-    """Load the persisted model, or train one on first start."""
     global _model
     with _lock:
         if _model is not None:

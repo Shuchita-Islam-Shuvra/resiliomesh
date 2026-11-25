@@ -1,4 +1,3 @@
-// Turn Postgres / PostgREST / backend errors into clear user-facing messages.
 const FRIENDLY = {
   FORBIDDEN: 'You do not have permission to do that.',
   NOT_FOUND: 'The record no longer exists.',

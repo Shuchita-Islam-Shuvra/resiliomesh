@@ -24,7 +24,6 @@ const AnalyticsPage = lazy(() => import('./pages/AnalyticsPage'))
 const AdminPage = lazy(() => import('./pages/AdminPage'))
 const AccountPage = lazy(() => import('./pages/AccountPage'))
 
-// warm every page chunk in the background once the shell is idle so navigation is instant
 const PRELOAD = [
   () => import('./pages/RiskMapPage'), () => import('./pages/IncidentsPage'), () => import('./pages/IncidentDetailPage'),
   () => import('./pages/ReportIncidentPage'), () => import('./pages/RiskAnalysisPage'), () => import('./pages/ResourcesPage'),
@@ -33,7 +32,7 @@ const PRELOAD = [
 ]
 
 const COORD = ['city_officer', 'ngo_coordinator', 'admin']
-const OFFICERS = ['city_officer', 'admin'] // pump & crew planning + dispatch workflow (migration 015)
+const OFFICERS = ['city_officer', 'admin']
 const guard = (el, roles) => <ProtectedRoute roles={roles}>{el}</ProtectedRoute>
 
 export default function App() {

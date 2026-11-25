@@ -1,17 +1,13 @@
-# secrets
 .env
 .env.*
 !.env.example
-# python
 __pycache__/
 *.pyc
 .venv/
 .pytest_cache/
-# node
 node_modules/
 dist/
 playwright-report/
 test-results/
-# misc
 .DS_Store
 *.log

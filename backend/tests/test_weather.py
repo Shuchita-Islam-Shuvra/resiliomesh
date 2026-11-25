@@ -1,4 +1,3 @@
-"""A06 — external API timeouts, malformed data, retries, circuit breaker, fallbacks."""
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -47,7 +46,7 @@ def test_timeout_retries_then_falls_back_to_climatology():
         raise httpx.ReadTimeout("slow", request=r)
     c, calls = client_with(timeout, max_retries=3)
     out = c.get("W1", 23.75, 90.4)
-    assert calls["n"] == 3                         # retried
+    assert calls["n"] == 3
     assert out["source"] == "climatology" and out["degraded"]
     assert out["rain_next_24h_mm"] >= 0 and "ReadTimeout" in out["error"]
 
@@ -91,7 +90,7 @@ def test_circuit_breaker_opens_and_skips_upstream():
     assert c.breaker.state == "open"
     before = calls["n"]
     out = c.get("C", 23.7, 90.4)
-    assert calls["n"] == before                      # upstream not called while open
+    assert calls["n"] == before
     assert "circuit breaker open" in out["error"]
     clock["t"] = 61
     assert c.breaker.state == "half_open"

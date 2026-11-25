@@ -1,4 +1,3 @@
-"""A02 — constraint optimisation incl. conflicting / infeasible requests."""
 from app.services.optimizer import Constraints, IncidentDemand, ResourcePool, derive_demand, optimize
 
 DHAKA = (23.75, 90.40)
@@ -38,13 +37,12 @@ def test_last_pump_goes_to_highest_risk():
 
 
 def test_distance_constraint_excludes_far_resources():
-    far = pool("far", "pump", 5, lat=24.5, lng=91.5)   # ~120 km away
+    far = pool("far", "pump", 5, lat=24.5, lng=91.5)
     r = optimize([inc("i1", demand={"pump": 1})], [far, pool("c", "crew", 1)], Constraints(max_distance_km=10))
     assert total(r, "pump") == 0
 
 
 def test_pump_requires_crew_coupling():
-    # pumps available but zero crews -> pumps must not be sent alone
     r = optimize([inc("i1", level="high", demand={"pump": 2})], [pool("p", "pump", 4)],
                  Constraints(pump_requires_crew=True))
     assert total(r, "pump") == 0
@@ -54,7 +52,7 @@ def test_infeasible_critical_returns_diagnosis_and_relaxed_plan():
     crit = inc("crit", level="critical", score=95, demand={"pump": 5, "crew": 1})
     r = optimize([crit], [pool("p", "pump", 2), pool("c", "crew", 3)])
     assert r.relaxed is True and r.feasible is False
-    assert total(r, "pump") == 2               # best effort still dispatches what exists
+    assert total(r, "pump") == 2
     short = [s for s in r.shortages if s["resource_type"] == "pump"]
     assert short and short[0]["short_by"] == 3
     assert any("RELAXED" in n for n in r.notes)

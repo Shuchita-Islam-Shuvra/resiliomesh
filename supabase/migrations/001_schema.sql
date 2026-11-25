@@ -1,12 +1,6 @@
--- =====================================================================
--- ResilioMesh — 001 core schema
--- Run in Supabase SQL Editor (or `supabase db push`) in numeric order.
--- =====================================================================
-
 create extension if not exists postgis;
 create extension if not exists pgcrypto;
 
--- ---------- Enums ----------------------------------------------------
 do $$ begin
   create type app_role as enum ('citizen','city_officer','ngo_coordinator','field_worker','admin');
 exception when duplicate_object then null; end $$;
@@ -55,7 +49,6 @@ do $$ begin
   create type need_status as enum ('open','partially_fulfilled','fulfilled','cancelled','duplicate');
 exception when duplicate_object then null; end $$;
 
--- ---------- Organizations & profiles --------------------------------
 create table if not exists organizations (
   id          uuid primary key default gen_random_uuid(),
   name        text not null unique check (char_length(name) between 3 and 120),
@@ -65,7 +58,7 @@ create table if not exists organizations (
 );
 
 create table if not exists wards (
-  id                 text primary key,              -- e.g. 'DSCC-09'
+  id                 text primary key,
   name               text not null,
   city_corporation   text not null check (city_corporation in ('DNCC','DSCC')),
   lat                double precision not null,
@@ -97,7 +90,6 @@ create table if not exists profiles (
 create index if not exists idx_profiles_role on profiles(role);
 create index if not exists idx_profiles_org on profiles(organization_id);
 
--- ---------- Drainage assets -----------------------------------------
 create table if not exists drainage_assets (
   id               uuid primary key default gen_random_uuid(),
   code             text not null unique,
@@ -119,13 +111,12 @@ create table if not exists drainage_assets (
 create index if not exists idx_assets_ward on drainage_assets(ward_id);
 create index if not exists idx_assets_geo on drainage_assets using gist(location);
 
--- ---------- Incidents (citizen / field reports) ----------------------
 create sequence if not exists incident_ref_seq start 1001;
 
 create table if not exists incidents (
   id               uuid primary key default gen_random_uuid(),
   reference_code   text not null unique default ('RM-' || to_char(now(),'YYMM') || '-' || nextval('incident_ref_seq')),
-  client_id        uuid unique,                       -- offline idempotency key
+  client_id        uuid unique,
   reporter_id      uuid not null references profiles(id),
   ward_id          text not null references wards(id),
   asset_id         uuid references drainage_assets(id) on delete set null,
@@ -167,7 +158,6 @@ create table if not exists incident_status_history (
 );
 create index if not exists idx_ish_incident on incident_status_history(incident_id, created_at);
 
--- ---------- Risk assessments (explainable AI output) ----------------
 create table if not exists risk_assessments (
   id             uuid primary key default gen_random_uuid(),
   incident_id    uuid references incidents(id) on delete cascade,
@@ -176,7 +166,7 @@ create table if not exists risk_assessments (
   level          risk_level not null,
   model_version  text not null,
   features       jsonb not null,
-  contributions  jsonb not null,     -- SHAP contributions per feature
+  contributions  jsonb not null,
   rules_fired    jsonb not null default '[]'::jsonb,
   weather_source text not null,
   created_by     uuid references profiles(id),
@@ -185,7 +175,6 @@ create table if not exists risk_assessments (
 create index if not exists idx_risk_incident on risk_assessments(incident_id, created_at desc);
 create index if not exists idx_risk_ward on risk_assessments(ward_id, created_at desc);
 
--- ---------- Resources / inventory -----------------------------------
 create table if not exists resources (
   id                 uuid primary key default gen_random_uuid(),
   organization_id    uuid not null references organizations(id),
@@ -206,7 +195,6 @@ create table if not exists resources (
 create index if not exists idx_resources_type on resources(resource_type);
 create index if not exists idx_resources_org on resources(organization_id);
 
--- ---------- Community needs (NGO module) ----------------------------
 create table if not exists community_needs (
   id              uuid primary key default gen_random_uuid(),
   ward_id         text not null references wards(id),
@@ -231,7 +219,6 @@ create table if not exists community_needs (
 create index if not exists idx_needs_dedup on community_needs(dedup_key, created_at desc);
 create index if not exists idx_needs_ward_status on community_needs(ward_id, status);
 
--- ---------- Allocation plans (optimizer output) ---------------------
 create table if not exists allocation_plans (
   id            uuid primary key default gen_random_uuid(),
   incident_ids  uuid[] not null,
@@ -239,8 +226,8 @@ create table if not exists allocation_plans (
   feasible      boolean not null,
   relaxed       boolean not null default false,
   objective     numeric,
-  assignments   jsonb not null,   -- [{incident_id, resource_id, resource_type, quantity, distance_km}]
-  explanation   jsonb not null,   -- solver diagnostics, shortages, constraints
+  assignments   jsonb not null,
+  explanation   jsonb not null,
   constraints   jsonb not null,
   created_by    uuid references profiles(id),
   approved_by   uuid references profiles(id),
@@ -252,7 +239,6 @@ create table if not exists allocation_plans (
 );
 create index if not exists idx_plans_status on allocation_plans(status, created_at desc);
 
--- ---------- Allocations (reservations) ------------------------------
 create table if not exists allocations (
   id               uuid primary key default gen_random_uuid(),
   resource_id      uuid not null references resources(id),
@@ -271,7 +257,6 @@ create table if not exists allocations (
 create index if not exists idx_alloc_resource on allocations(resource_id, status);
 create index if not exists idx_alloc_plan on allocations(plan_id);
 
--- ---------- Tasks (field operations) --------------------------------
 create table if not exists tasks (
   id            uuid primary key default gen_random_uuid(),
   incident_id   uuid not null references incidents(id) on delete cascade,
@@ -293,7 +278,6 @@ create table if not exists tasks (
 create index if not exists idx_tasks_assignee on tasks(assigned_to, status);
 create index if not exists idx_tasks_incident on tasks(incident_id);
 
--- ---------- Workflow engine -----------------------------------------
 create table if not exists workflow_runs (
   id              uuid primary key default gen_random_uuid(),
   plan_id         uuid not null references allocation_plans(id),
@@ -303,7 +287,7 @@ create table if not exists workflow_runs (
   attempts        integer not null default 0,
   max_attempts    integer not null default 3,
   last_error      text,
-  inject_failure  text,               -- test/demo fault injection (admin only)
+  inject_failure  text,
   idempotency_key text not null unique,
   next_run_at     timestamptz not null default now(),
   locked_by       text,
@@ -314,8 +298,6 @@ create table if not exists workflow_runs (
   created_at      timestamptz not null default now(),
   updated_at      timestamptz not null default now()
 );
--- generation: bumped on manual retry so side-effect idempotency keys differ from the
--- compensated (released / cancelled) attempt, while replays within one attempt stay idempotent
 alter table workflow_runs add column if not exists generation integer not null default 1;
 create index if not exists idx_runs_queue on workflow_runs(status, next_run_at);
 
@@ -333,7 +315,6 @@ create table if not exists workflow_steps (
   constraint uq_run_step unique (run_id, step_name)
 );
 
--- ---------- Weather cache (external API fault tolerance) ------------
 create table if not exists weather_cache (
   ward_id     text primary key references wards(id),
   payload     jsonb not null,
@@ -341,7 +322,6 @@ create table if not exists weather_cache (
   fetched_at  timestamptz not null default now()
 );
 
--- ---------- Historical data (analytics, large volume) ---------------
 create table if not exists historical_flood_events (
   id               bigserial primary key,
   ward_id          text not null references wards(id),
@@ -351,13 +331,12 @@ create table if not exists historical_flood_events (
   duration_hr      numeric(5,1),
   households_affected integer,
   source           text not null default 'import',
-  record_hash      text not null unique,      -- dedup
+  record_hash      text not null unique,
   imported_at      timestamptz not null default now()
 );
 create index if not exists idx_hfe_ward_date on historical_flood_events(ward_id, event_date);
 create index if not exists idx_hfe_date on historical_flood_events(event_date);
 
--- ---------- Audit log (append-only) ---------------------------------
 create table if not exists audit_logs (
   id          bigserial primary key,
   actor_id    uuid,

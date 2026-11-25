@@ -2,16 +2,10 @@ import { useEffect, useId, useRef } from 'react'
 import { motion } from 'framer-motion'
 import { ROLES } from '../lib/roles'
 
-/**
- * Capsule-shaped segmented control listing every user type.
- * Keyboard: arrow keys / Home / End move between roles (WAI-ARIA tabs pattern).
- */
 export default function RoleCapsule({ value, onChange, dark = false, compact = false, className = '', label = 'Choose your account type' }) {
   const group = useId()
   const refs = useRef([])
   const idx = Math.max(0, ROLES.findIndex((r) => r.key === value))
-  // keep the selected pill visible when the bar scrolls sideways on small screens
-  // (horizontal only — never scrolls the page itself)
   const bar = useRef(null)
   useEffect(() => {
     const c = bar.current, el = refs.current[idx]
@@ -52,7 +46,6 @@ export default function RoleCapsule({ value, onChange, dark = false, compact = f
                 transition={{ type: 'spring', stiffness: 420, damping: 34 }} />
             )}
             <Icon className="relative h-4 w-4" aria-hidden />
-            {/* phones: only the selected pill shows its name, the rest are icons */}
             <span className={`relative ${active ? '' : 'hidden sm:inline'}`}>{compact ? r.short : r.label}</span>
           </button>
         )

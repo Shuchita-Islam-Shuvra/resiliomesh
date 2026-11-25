@@ -1,13 +1,3 @@
--- =====================================================================
--- ResilioMesh — 006 role-based registration (staff access requests)
--- ---------------------------------------------------------------------
--- Every self-registered account still starts as 'citizen' (no privilege
--- escalation). If the sign-up form asked for a staff role, a pending
--- role_request is filed with the role-specific details; an admin approves
--- it from Admin → Access requests, which then grants the role + org.
--- Admin accounts can never be requested from the public form.
--- =====================================================================
-
 create table if not exists role_requests (
   id                uuid primary key default gen_random_uuid(),
   user_id           uuid not null references profiles(id) on delete cascade,
@@ -33,14 +23,11 @@ grant select on role_requests to authenticated;
 drop policy if exists role_requests_read on role_requests;
 create policy role_requests_read on role_requests for select to authenticated
   using (user_id = auth.uid() or rm_role() = 'admin');
--- no insert/update/delete policies: rows are created by the sign-up trigger and
--- changed only through rm_review_role_request() below.
 
 drop trigger if exists trg_audit_role_requests on role_requests;
 create trigger trg_audit_role_requests after insert or update or delete on role_requests
   for each row execute function rm_audit();
 
--- Public (anon) list of organisations for the sign-up form: id / name / type only.
 create or replace function public.rm_public_organizations()
 returns table (id uuid, name text, type org_type)
 language sql stable security definer set search_path = public as $$
@@ -48,7 +35,6 @@ language sql stable security definer set search_path = public as $$
 $$;
 grant execute on function public.rm_public_organizations() to anon, authenticated;
 
--- ---------- New auth user -> citizen profile (+ optional role request) ----
 create or replace function public.handle_new_user() returns trigger
 language plpgsql security definer set search_path = public as $$
 declare
@@ -68,7 +54,7 @@ begin
     coalesce(nullif(trim(m->>'full_name'), ''), split_part(new.email, '@', 1)),
     new.email,
     nullif(m->>'phone', ''),
-    'citizen',                      -- always citizen; staff roles need admin approval
+    'citizen',
     v_ward
   )
   on conflict (id) do nothing;
@@ -95,7 +81,7 @@ begin
         v_ward
       );
     exception when check_violation or unique_violation then
-      null;   -- malformed staff details must never block account creation (profile is kept)
+      null;
     end;
   end if;
   return new;
@@ -105,7 +91,6 @@ drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created after insert on auth.users
   for each row execute function public.handle_new_user();
 
--- ---------- Admin review --------------------------------------------
 create or replace function public.rm_review_role_request(
   p_id uuid, p_approve boolean, p_org_id uuid default null, p_note text default null)
 returns role_requests
@@ -141,7 +126,6 @@ begin
 end $$;
 grant execute on function public.rm_review_role_request(uuid, boolean, uuid, text) to authenticated;
 
--- realtime: the requester's login screen / admin queue update live
 do $$ begin
   alter publication supabase_realtime add table role_requests;
 exception when others then null; end $$;

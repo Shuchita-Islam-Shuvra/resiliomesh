@@ -1,4 +1,3 @@
-// M03 / M06 / M07 — authentication, protected routes, validation feedback, keyboard access
 import { expect, test } from '@playwright/test'
 import { PASSWORD, login } from './helpers'
 
@@ -8,14 +7,14 @@ test('unauthenticated users are redirected to login', async ({ page }) => {
 })
 
 test('login form shows inline validation errors', async ({ page }) => {
-  await page.goto('/login?view=form')
+  await page.goto('/login?role=citizen&view=form')
   await page.getByRole('button', { name: 'Sign in', exact: true }).click()
   await expect(page.getByText('Enter your email address')).toBeVisible()
   await expect(page.getByText('Enter your password')).toBeVisible()
 })
 
 test('wrong password gives a clear error', async ({ page }) => {
-  await page.goto('/login?view=form')
+  await page.goto('/login?role=citizen&view=form')
   await page.getByLabel('Email').fill('citizen@resiliomesh.demo')
   await page.getByLabel('Password', { exact: true }).fill('definitely-wrong-1')
   await page.getByRole('button', { name: 'Sign in', exact: true }).click()
@@ -24,7 +23,7 @@ test('wrong password gives a clear error', async ({ page }) => {
 
 test('login form is fully keyboard operable', async ({ page }) => {
   test.skip(!PASSWORD, 'E2E_PASSWORD not set')
-  await page.goto('/login?view=form')
+  await page.goto('/login?role=citizen&view=form')
   await page.getByLabel('Email').focus()
   await page.keyboard.type('citizen@resiliomesh.demo')
   await page.keyboard.press('Tab')
@@ -102,10 +101,9 @@ test('registration accepts Bangladeshi mobile numbers only', async ({ page }) =>
 test('demo accounts under the sign-in form show only the open role tab', async ({ page }) => {
   await page.goto('/login?role=city_officer')
   const box = page.getByRole('region', { name: 'Demo accounts for judges' })
-  // the box hides itself when the server reports DEMO_MODE off
   test.skip(!(await box.isVisible().catch(() => false)), 'demo mode is off on this server')
-  await expect(page.getByLabel('Email')).toBeVisible()                       // normal form is still there
-  await expect(box.getByRole('button')).toHaveCount(2)                       // only this tab's role (South + North officer)
+  await expect(page.getByLabel('Email')).toBeVisible()
+  await expect(box.getByRole('button')).toHaveCount(2)
   await expect(box.getByRole('button', { name: /Sign in as Tanvir Hasan, Water Resilience Officer, Dhaka South/ })).toBeEnabled()
   await expect(box.getByRole('button', { name: /Sign in as Nusrat Jahan, Water Resilience Officer, Dhaka North/ })).toBeEnabled()
   await page.getByRole('tab', { name: /Citizen/ }).click()

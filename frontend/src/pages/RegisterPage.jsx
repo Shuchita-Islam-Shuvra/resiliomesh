@@ -34,7 +34,7 @@ export default function RegisterPage() {
   const [orgs, setOrgs] = useState([])
   const [errors, setErrors] = useState({})
   const [msg, setMsg] = useState(null)
-  const [done, setDone] = useState(null)     // success screen
+  const [done, setDone] = useState(null)
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
@@ -50,7 +50,6 @@ export default function RegisterPage() {
   const setRole = (k) => {
     const next = new URLSearchParams(params); next.set('role', k)
     setParams(next, { replace: true })
-    // keep the common identity fields, drop role-specific ones
     setV((cur) => ({ ...EMPTY, full_name: cur.full_name, email: cur.email, phone: cur.phone, accept_terms: cur.accept_terms }))
     setErrors({}); setMsg(null)
   }
@@ -88,13 +87,12 @@ export default function RegisterPage() {
     }
     try {
       const data = await signUp(payload)
-      // Supabase returns a user with no identities when the email is already registered
       if (data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
         setMsg({ tone: 'error', text: 'An account with this email already exists. Sign in instead, or use “Forgot password”.' })
         return
       }
       if (!staff && data.session) { nav('/dashboard'); return }
-      if (staff && data.session) await signOut()      // staff wait for approval before using the console
+      if (staff && data.session) await signOut()
       setDone({ needsConfirm: !data.session })
     } catch (err) {
       setMsg({
@@ -109,7 +107,6 @@ export default function RegisterPage() {
     } finally { setBusy(false) }
   }
 
-  // ---------- admin: no public sign-up ----------
   if (role === 'admin') {
     return (
       <SignUpLayout role={role} onRoleChange={setRole} title="Admin accounts" subtitle={R.signInSubtitle}>
@@ -124,7 +121,6 @@ export default function RegisterPage() {
     )
   }
 
-  // ---------- success ----------
   if (done) {
     return (
       <SignUpLayout role={role} title={staff ? 'Access request submitted' : 'Account created'} subtitle={staff ? 'We have your details — an administrator will review them.' : 'Welcome to ResilioMesh.'}>

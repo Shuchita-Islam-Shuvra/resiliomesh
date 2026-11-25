@@ -3,7 +3,6 @@ import { Eye, EyeOff } from 'lucide-react'
 import { Input } from './ui'
 import { passwordStrength } from '../lib/validation'
 
-/** Password field with show/hide toggle and a Caps Lock warning. Spread Field's a11y props into it. */
 export function PasswordInput({ onKeyUp, ...props }) {
   const [show, setShow] = useState(false)
   const [caps, setCaps] = useState(false)

@@ -6,14 +6,8 @@ import { supabase } from '../lib/supabase'
 
 const AuthCtx = createContext(null)
 
-// PostgREST: function not found → migration 008 not applied yet
 const isMissingFn = (e) => e && (e.code === 'PGRST202' || e.code === '42883' || /could not find the function|does not exist/i.test(e.message || ''))
 
-/**
- * Which verification step a signed-in staff account still owes before its role
- * is active. The database enforces the same rule (rm_effective_role); this only
- * decides which screen to show.
- */
 export function sessionGate(status) {
   if (!status || status.account_role === 'citizen' || !status.is_active) return null
   if (!status.staff_verified) return 'staff_id'
@@ -25,7 +19,7 @@ export function AuthProvider({ children }) {
   const [session, setSession] = useState(null)
   const [profile, setProfile] = useState(null)
   const [org, setOrg] = useState(null)
-  const [security, setSecurity] = useState(null)      // rm_session_status() + gate, null before migration 008
+  const [security, setSecurity] = useState(null)
   const [loading, setLoading] = useState(true)
   const seq = useRef(0)
 
@@ -33,20 +27,18 @@ export function AuthProvider({ children }) {
     const my = ++seq.current
     if (!s?.user) { setProfile(null); setOrg(null); setSecurity(null); return }
     const [{ data, error }, st] = await Promise.all([
-      // organizations(*) rather than a column list: still works before migration 009 adds city_corporation
       supabase.from('profiles').select('*, organizations(*)').eq('id', s.user.id).maybeSingle(),
       supabase.rpc('rm_session_status'),
     ])
-    if (my !== seq.current) return                      // a newer load (e.g. after MFA) already won
+    if (my !== seq.current) return
     if (error || !data) { setProfile(null); setSecurity(null); return }
-    if (!data.is_active) {          // deactivated accounts are signed out immediately
+    if (!data.is_active) {
       await supabase.auth.signOut()
       setProfile(null); setSecurity(null)
       return
     }
     const status = st.error ? null : st.data
     if (st.error && !isMissingFn(st.error)) console.warn('session status unavailable', st.error.message)
-    // UI permissions follow the role the DATABASE grants this session, not the stored role
     setProfile({ ...data, account_role: data.role, role: status ? (status.effective_role || 'citizen') : data.role })
     setOrg(data.organizations || null)
     setSecurity(status ? { ...status, gate: sessionGate(status) } : null)
@@ -61,13 +53,11 @@ export function AuthProvider({ children }) {
     })
     const { data: sub } = supabase.auth.onAuthStateChange((event, s) => {
       setSession(s)
-      // defer DB call out of the auth callback (supabase-js recommendation)
       setTimeout(() => loadProfile(s), 0)
     })
     return () => sub.subscription.unsubscribe()
   }, [loadProfile])
 
-  // react instantly if an admin changes my role / deactivates me
   useEffect(() => {
     if (!supabase || !session?.user) return
     const ch = supabase.channel(`me:${session.user.id}`)
@@ -77,7 +67,6 @@ export function AuthProvider({ children }) {
     return () => { supabase.removeChannel(ch) }
   }, [session, loadProfile])
 
-  // the verified staff session has a lifetime (default 12 h): re-check when it ends
   useEffect(() => {
     const until = security?.staff_expires_at && new Date(security.staff_expires_at).getTime()
     if (!until || !session) return
@@ -93,7 +82,7 @@ export function AuthProvider({ children }) {
 
   const value = useMemo(() => {
     const signOut = async () => {
-      try { await supabase.rpc('rm_end_staff_session') } catch { /* migration 008 not applied / offline */ }
+      try { await supabase.rpc('rm_end_staff_session') } catch { }
       await supabase.auth.signOut()
       setProfile(null); setSecurity(null)
     }
@@ -102,7 +91,6 @@ export function AuthProvider({ children }) {
       throw Object.assign(new Error(message), { code, ...extra })
     }
 
-    /** Server-side second step for staff: Employee / Staff / Admin ID, or the NGO. */
     const verifyStaff = async (role, extra = {}) => {
       const { data: r, error } = await supabase.rpc('rm_verify_staff_login', {
         p_role: role, p_staff_id: (extra.employee_id || '').trim() || null, p_org_id: extra.organization_id || null,
@@ -111,7 +99,6 @@ export function AuthProvider({ children }) {
       return r
     }
 
-    // Pre-008 fallback: the old browser-side comparison (no server enforcement exists yet).
     const legacyCheck = async (uid, expectedRole, extra) => {
       const { data: p } = await supabase.from('profiles').select('*').eq('id', uid).maybeSingle()
       if (!p) return fail('NO_PROFILE', 'Your profile could not be loaded. Please try again.')
@@ -126,7 +113,6 @@ export function AuthProvider({ children }) {
     const explainFailure = async (r, uid, expectedRole) => {
       switch (r.code) {
         case 'ROLE_MISMATCH': {
-          // the account may have asked for this staff role at sign-up and still be waiting
           const { data: req } = await supabase.from('role_requests')
             .select('requested_role, status, review_note, created_at').eq('user_id', uid)
             .order('created_at', { ascending: false }).limit(1).maybeSingle()
@@ -149,7 +135,6 @@ export function AuthProvider({ children }) {
       }
     }
 
-    /** After the password step: role check / server-side staff-ID check, then load the profile. */
     async function finishRoleSignIn(data, expectedRole, extra = {}) {
       const uid = data.user.id
       let r
@@ -174,8 +159,8 @@ export function AuthProvider({ children }) {
       role: profile?.role,
       hasRole: (...roles) => Boolean(profile && roles.includes(profile.role)),
       isStaff: Boolean(profile && profile.role !== 'citizen'),
-      // Dhaka North / South of Water Resilience Officers and city-corporation field crews (from their
-      // organisation); NGO staff, admins and citizens are city-wide (null)
+      adminScope: profile?.role === 'admin' ? (profile.admin_scope || 'owner') : null,
+      isSystemOwner: profile?.role === 'admin' && (profile.admin_scope || 'owner') === 'owner',
       area: AREA_BOUND_ROLES.includes(profile?.role) ? (org?.city_corporation || null) : null,
       canManageArea: (wardArea) => canManageAreaFor(profile?.role, org?.city_corporation, wardArea),
       refreshProfile: refresh,
@@ -185,32 +170,17 @@ export function AuthProvider({ children }) {
         if (error) throw error
         return data
       },
-      /**
-       * Sign in on a role tab. Password first (Supabase Auth), then the role's
-       * second identifier is checked BY THE DATABASE, which binds staff
-       * privileges to this session. On failure the session is closed and an
-       * error with `.code` is thrown: ROLE_MISMATCH (err.actualRole),
-       * ROLE_PENDING / ROLE_REJECTED (err.request), ID_MISMATCH (err.attemptsLeft),
-       * LOCKED, ID_MISSING, INACTIVE.
-       * Resolves to { mfa: true } when an authenticator code is still required.
-       */
       signInAs: async (email, password, expectedRole, extra = {}) => {
         const { data, error } = await supabase.auth.signInWithPassword({ email, password })
         if (error) throw error
         return finishRoleSignIn(data, expectedRole, extra)
       },
-      /**
-       * Judge demo: one click per demo profile. The server checks the privately shared
-       * access code and signs in with the demo password (which never reaches the browser);
-       * the session then goes through the same server-side staff-ID step as a normal sign-in.
-       */
       signInDemo: async (profileKey, code) => {
         const r = await api('/api/demo/session', { method: 'POST', body: { profile: profileKey, code }, timeoutMs: 90000 })
         const { data, error } = await supabase.auth.setSession({ access_token: r.access_token, refresh_token: r.refresh_token })
         if (error) throw error
         return finishRoleSignIn(data, r.role, r.extra || {})
       },
-      /** Re-verify the staff ID for the current session (expired shift, page opened later…). */
       verifyStaffSession: async (extra = {}) => {
         const r = await verifyStaff(profile?.account_role, extra)
         if (!r?.ok) throw Object.assign(new Error(r?.code === 'LOCKED'
@@ -237,7 +207,6 @@ export function AuthProvider({ children }) {
         const { error } = await supabase.auth.updateUser({ password })
         if (error) throw error
       },
-      // ---- mobile number: SMS one-time code via Supabase Auth (phone_change)
       startPhoneVerification: async (phone) => {
         const e164 = normalizeBdPhone(phone)
         if (!e164) throw new Error('Enter a Bangladeshi mobile number, e.g. 01712345678')
@@ -250,22 +219,19 @@ export function AuthProvider({ children }) {
         if (error) throw error
         await refresh()
       },
-      // ---- authenticator app (TOTP, Supabase MFA)
       mfa: {
-        /** verified authenticator apps of this account */
         list: async () => {
           const { data, error } = await supabase.auth.mfa.listFactors()
           if (error) throw error
           return data?.totp || []
         },
         enroll: async () => {
-          // drop half-finished enrolments first (they would block a new one)
           const { data: f } = await supabase.auth.mfa.listFactors()
           for (const x of (f?.all || []).filter((x) => x.factor_type === 'totp' && x.status !== 'verified'))
             await supabase.auth.mfa.unenroll({ factorId: x.id })
           const { data, error } = await supabase.auth.mfa.enroll({ factorType: 'totp', friendlyName: `ResilioMesh ${new Date().toISOString().slice(0, 16)}` })
           if (error) throw error
-          return data      // { id, totp: { qr_code, secret, uri } }
+          return data
         },
         verify: async (factorId, code) => {
           const { error } = await supabase.auth.mfa.challengeAndVerify({ factorId, code: code.trim() })

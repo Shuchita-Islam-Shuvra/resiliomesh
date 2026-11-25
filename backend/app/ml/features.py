@@ -1,18 +1,17 @@
-"""Feature definitions shared by training and inference."""
 from __future__ import annotations
 
 FEATURES: list[str] = [
-    "rain_past_24h_mm",        # observed rainfall, previous 24h
-    "rain_next_24h_mm",        # forecast rainfall, next 24h
-    "max_hourly_mm",           # peak hourly intensity (forecast)
-    "drainage_capacity_mm_hr", # design capacity of ward drainage
-    "impervious_pct",          # % sealed surface
-    "elevation_m",             # mean ward elevation above MSL
-    "asset_condition",         # 0-100, condition of linked/nearby drainage assets
-    "blocked_assets",          # count of blocked assets in ward
-    "historical_events_10y",   # past waterlogging events in ward
-    "recent_reports_6h",       # citizen reports within 300 m in last 6 h
-    "monsoon",                 # 1 if Jun-Sep, 0.5 May/Oct, else 0
+    "rain_past_24h_mm",
+    "rain_next_24h_mm",
+    "max_hourly_mm",
+    "drainage_capacity_mm_hr",
+    "impervious_pct",
+    "elevation_m",
+    "asset_condition",
+    "blocked_assets",
+    "historical_events_10y",
+    "recent_reports_6h",
+    "monsoon",
 ]
 
 FEATURE_LABELS: dict[str, str] = {
@@ -39,7 +38,6 @@ def monsoon_factor(month: int) -> float:
 
 
 def clean_features(raw: dict) -> dict[str, float]:
-    """Coerce + impute missing values with conservative defaults (never crash on None)."""
     defaults = {
         "rain_past_24h_mm": 0.0, "rain_next_24h_mm": 0.0, "max_hourly_mm": 0.0,
         "drainage_capacity_mm_hr": 25.0, "impervious_pct": 80.0, "elevation_m": 5.5,
@@ -51,7 +49,7 @@ def clean_features(raw: dict) -> dict[str, float]:
         v = raw.get(f)
         try:
             v = float(v)
-            if v != v or v < 0 and f != "elevation_m":  # NaN or negative
+            if v != v or v < 0 and f != "elevation_m":
                 v = defaults[f]
         except (TypeError, ValueError):
             v = defaults[f]

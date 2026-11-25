@@ -1,4 +1,3 @@
-// A04 — field worker updates a task while offline; sync on reconnect
 import { expect, test } from '@playwright/test'
 import { PASSWORD, login } from './helpers'
 

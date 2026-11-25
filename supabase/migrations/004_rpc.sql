@@ -1,11 +1,3 @@
--- =====================================================================
--- ResilioMesh — 004 transactional RPCs (concurrency, workflow, analytics)
--- =====================================================================
-
--- =====================================================================
--- A05: atomic, idempotent stock reservation with row-level locking
--- Internal (system) function: called by backend workflow + wrapper RPCs.
--- =====================================================================
 create or replace function public.rm_reserve_resource(
   p_resource_id uuid, p_qty integer, p_idempotency_key text,
   p_incident_id uuid default null, p_need_id uuid default null,
@@ -23,17 +15,14 @@ begin
     raise exception 'VALIDATION: idempotency key required' using errcode = '22023';
   end if;
 
-  -- fast path: replayed request returns the original result (idempotency)
   select * into v_alloc from allocations where idempotency_key = p_idempotency_key;
   if found then return v_alloc; end if;
 
-  -- serialize all reservations of this resource row
   select * into v_res from resources where id = p_resource_id for update;
   if not found then
     raise exception 'NOT_FOUND: resource %', p_resource_id using errcode = 'P0002';
   end if;
 
-  -- re-check after acquiring the lock: a concurrent duplicate may have committed
   select * into v_alloc from allocations where idempotency_key = p_idempotency_key;
   if found then return v_alloc; end if;
 
@@ -50,14 +39,12 @@ begin
     values (p_resource_id, p_incident_id, p_need_id, p_plan_id, p_qty, p_idempotency_key, coalesce(p_actor, rm_actor()))
     returning * into v_alloc;
   exception when unique_violation then
-    -- lost an idempotency race on another resource row: undo our decrement, return winner
     update resources set quantity_available = quantity_available + p_qty where id = p_resource_id;
     select * into v_alloc from allocations where idempotency_key = p_idempotency_key;
   end;
   return v_alloc;
 end $$;
 
--- compensation: idempotent release (returns stock exactly once)
 create or replace function public.rm_release_allocation(p_allocation_id uuid, p_reason text default 'released')
 returns allocations
 language plpgsql security definer set search_path = public as $$
@@ -78,10 +65,6 @@ end $$;
 revoke execute on function public.rm_reserve_resource(uuid,integer,text,uuid,uuid,uuid,uuid) from public, anon, authenticated;
 revoke execute on function public.rm_release_allocation(uuid,text) from public, anon, authenticated;
 
--- =====================================================================
--- NGO direct allocation to a community need (user-facing RPC)
--- "Multiple coordinators request the final available relief kit"
--- =====================================================================
 create or replace function public.allocate_to_need(
   p_need_id uuid, p_resource_id uuid, p_qty integer, p_idempotency_key text
 ) returns jsonb
@@ -136,9 +119,6 @@ begin
   return jsonb_build_object('ok', true, 'replayed', v_existing, 'allocation', to_jsonb(v_alloc));
 end $$;
 
--- =====================================================================
--- Incident transitions with optimistic locking (A01) + role rules (M04)
--- =====================================================================
 create or replace function public.transition_incident(
   p_incident_id uuid, p_to incident_status, p_expected_version integer,
   p_note text default null, p_duplicate_of uuid default null
@@ -157,7 +137,6 @@ begin
     return jsonb_build_object('ok', false, 'conflict', true, 'current', to_jsonb(v_inc));
   end if;
 
-  -- role rules per target state
   if p_to in ('verified','rejected','duplicate','resolved','assessed') and v_role not in ('city_officer','admin') then
     raise exception 'FORBIDDEN: % cannot move an incident to %', v_role, p_to using errcode = '42501';
   end if;
@@ -191,9 +170,6 @@ begin
   return jsonb_build_object('ok', true, 'incident', to_jsonb(v_inc));
 end $$;
 
--- =====================================================================
--- Plan approval: atomically approve + transition incidents + enqueue run
--- =====================================================================
 create or replace function public.approve_plan(
   p_plan_id uuid, p_expected_version integer, p_inject_failure text default null
 ) returns jsonb
@@ -217,7 +193,6 @@ begin
   select * into v_plan from allocation_plans where id = p_plan_id for update;
   if not found then raise exception 'NOT_FOUND: plan' using errcode = 'P0002'; end if;
 
-  -- idempotent approve: second click returns the same run
   if v_plan.status in ('approved','executing','executed') then
     select * into v_run from workflow_runs where plan_id = p_plan_id;
     return jsonb_build_object('ok', true, 'replayed', true, 'run_id', v_run.id);
@@ -245,7 +220,6 @@ begin
   update allocation_plans set status = 'approved', approved_by = auth.uid(), approved_at = now()
   where id = p_plan_id;
 
-  -- supersede other pending plans touching the same incidents
   update allocation_plans set status = 'superseded'
   where id <> p_plan_id and status = 'pending_approval' and incident_ids && v_plan.incident_ids;
 
@@ -280,7 +254,6 @@ begin
   return jsonb_build_object('ok', true);
 end $$;
 
--- admin: retry a failed / compensated run
 create or replace function public.retry_workflow_run(p_run_id uuid)
 returns jsonb language plpgsql security definer set search_path = public as $$
 declare v_run workflow_runs;
@@ -290,7 +263,6 @@ begin
   if v_run.status not in ('failed','compensated') then
     raise exception 'INVALID_STATE: only failed runs can be retried' using errcode = '23514';
   end if;
-  -- incidents were rolled back to 'assessed' by compensation; re-approve them
   perform set_config('rm.note', 'Workflow retry', true);
   update incidents i set status = 'approved'
     from allocation_plans p
@@ -305,7 +277,6 @@ begin
   return jsonb_build_object('ok', true);
 end $$;
 
--- worker: claim one runnable job (SKIP LOCKED queue; stale locks are reclaimed)
 create or replace function public.rm_claim_workflow_run(p_worker text)
 returns workflow_runs language plpgsql security definer set search_path = public as $$
 declare v_run workflow_runs;
@@ -326,9 +297,6 @@ begin
 end $$;
 revoke execute on function public.rm_claim_workflow_run(text) from public, anon, authenticated;
 
--- =====================================================================
--- Field task updates: version-checked, offline-sync friendly
--- =====================================================================
 create or replace function public.rm_task_transition_allowed(p_from task_status, p_to task_status)
 returns boolean language sql immutable as $$
   select case p_from
@@ -382,7 +350,6 @@ begin
     completed_at = case when p_status = 'completed' then now() else completed_at end
   where id = p_task_id returning * into v_task;
 
-  -- all tasks of the incident completed -> resolve incident, return reusable equipment
   if p_status = 'completed' then
     select count(*) into v_open from tasks
      where incident_id = v_task.incident_id and status not in ('completed','cancelled');
@@ -404,9 +371,6 @@ begin
   return jsonb_build_object('ok', true, 'task', to_jsonb(v_task));
 end $$;
 
--- =====================================================================
--- Geospatial helpers
--- =====================================================================
 create or replace function public.nearby_incidents(p_lat double precision, p_lng double precision, p_radius_m integer default 500)
 returns table(id uuid, reference_code text, category incident_category, status incident_status, distance_m double precision, created_at timestamptz)
 language sql stable security invoker set search_path = public as $$
@@ -419,7 +383,6 @@ language sql stable security invoker set search_path = public as $$
   limit 50
 $$;
 
--- Public ward-level aggregate (no personal data) — visible to every signed-in user
 create or replace function public.ward_risk_summary()
 returns table(ward_id text, name text, city_corporation text, lat double precision, lng double precision,
               population integer, risk_score numeric, risk_level risk_level, risk_updated_at timestamptz,
@@ -436,9 +399,6 @@ language sql stable security definer set search_path = public as $$
 $$;
 revoke execute on function public.ward_risk_summary() from anon;
 
--- =====================================================================
--- A08 analytics: indexed aggregates over live + large historical data
--- =====================================================================
 create or replace function public.analytics_dashboard(p_days integer default 30, p_ward text default null)
 returns jsonb
 language plpgsql stable security definer set search_path = public as $$

@@ -1,4 +1,3 @@
-"""Risk assessment pipeline: DB context + live weather -> XGBoost -> rule engine -> persist."""
 from __future__ import annotations
 
 import logging
@@ -52,7 +51,6 @@ where i.id = %s
 
 
 def assess_incident(incident_id: str, user: CurrentUser) -> dict:
-    # 1) read context (no lock held during the external API call)
     with db.tx() as conn:
         ctx = db.fetch_one(conn, _CONTEXT_SQL, (incident_id,))
         if ctx:
@@ -80,7 +78,6 @@ def assess_incident(incident_id: str, user: CurrentUser) -> dict:
     age_h = (datetime.now(timezone.utc) - ctx["created_at"]).total_seconds() / 3600
     prio = priority(result["score"], ctx["people_affected"], ctx["severity_reported"], age_h)
 
-    # 2) write atomically, re-checking state under row lock
     with db.tx(actor_id=user.id, note="AI risk assessment") as conn:
         cur = db.fetch_one(conn, "select status::text as status from incidents where id = %s for update", (incident_id,))
         if cur["status"] not in ("verified", "assessed"):
@@ -104,7 +101,6 @@ def assess_incident(incident_id: str, user: CurrentUser) -> dict:
 
 
 def refresh_wards(user: CurrentUser) -> dict:
-    """Re-score wards with live weather. Officers re-score only their own area."""
     with db.tx() as conn:
         area = officer_area(conn, user)
         wards = db.fetch_all(conn, """

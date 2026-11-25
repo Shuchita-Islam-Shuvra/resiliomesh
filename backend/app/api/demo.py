@@ -1,15 +1,3 @@
-"""Judge demo sign-in: one click per demo profile on the sign-in page.
-
-  * the demo password never leaves the server (env DEMO_PASSWORD),
-  * optional access code (env DEMO_ACCESS_CODE): when set, a judge needs it (it can ride
-    in a private link, /login#code=...); when empty, the profiles open with one click,
-  * attempts are rate-limited per IP,
-  * the whole feature is off unless DEMO_MODE=true (switch it off after judging).
-
-The server signs in to Supabase Auth with the demo account's password and hands the
-session to the browser. The browser then runs the normal server-side staff-ID step
-(rm_verify_staff_login), so demo sessions get exactly the same checks as real ones.
-"""
 from __future__ import annotations
 
 import hmac
@@ -29,20 +17,27 @@ router = APIRouter(prefix="/api/demo", tags=["demo"])
 
 SHOBAR = "11111111-1111-1111-1111-111111111103"
 NODI = "11111111-1111-1111-1111-111111111104"
-# profile key -> (account, role, second sign-in factor). Accounts are created by scripts/seed_demo.py.
 PROFILES: dict[str, tuple[str, str, dict]] = {
     "citizen": ("citizen@resiliomesh.demo", "citizen", {}),
+    "citizen_north": ("citizen2@resiliomesh.demo", "citizen", {}),
     "officer_south": ("officer@resiliomesh.demo", "city_officer", {"employee_id": "DSCC-OFF-01"}),
     "officer_north": ("officer2@resiliomesh.demo", "city_officer", {"employee_id": "DNCC-OFF-02"}),
     "ngo": ("ngo@resiliomesh.demo", "ngo_coordinator", {"organization_id": SHOBAR}),
     "ngo_north": ("ngo2@resiliomesh.demo", "ngo_coordinator", {"organization_id": NODI}),
     "field": ("field1@resiliomesh.demo", "field_worker", {"employee_id": "FW-001"}),
+    "field_north": ("field2@resiliomesh.demo", "field_worker", {"employee_id": "FW-002"}),
+    "field_relief": ("field3@resiliomesh.demo", "field_worker", {"employee_id": "FW-003"}),
+    "field_pump_south": ("field4@resiliomesh.demo", "field_worker", {"employee_id": "FW-004"}),
+    "field_drain_north": ("field5@resiliomesh.demo", "field_worker", {"employee_id": "FW-005"}),
+    "field_drain_south": ("field6@resiliomesh.demo", "field_worker", {"employee_id": "FW-006"}),
+    "field_medical": ("field7@resiliomesh.demo", "field_worker", {"employee_id": "FW-007"}),
     "admin": ("admin@resiliomesh.demo", "admin", {"employee_id": "ADM-001"}),
     "admin2": ("admin2@resiliomesh.demo", "admin", {"employee_id": "ADM-002"}),
 }
-ProfileKey = Literal["citizen", "officer_south", "officer_north", "ngo", "ngo_north", "field", "admin", "admin2"]
+ProfileKey = Literal["citizen", "citizen_north", "officer_south", "officer_north", "ngo", "ngo_north", "field", "field_north", "field_relief",
+                     "field_pump_south", "field_drain_north", "field_drain_south", "field_medical", "admin", "admin2"]
 
-_attempts = SlidingWindowLimiter(limit=10, window_s=60.0)     # per client IP
+_attempts = SlidingWindowLimiter(limit=10, window_s=60.0)
 
 
 def enabled() -> bool:
@@ -51,7 +46,6 @@ def enabled() -> bool:
 
 
 def _apikey() -> str:
-    """Auth API key for the server-side sign-in: the public anon key, else the service key (stays on the server)."""
     s = get_settings()
     return s.supabase_anon_key or s.supabase_service_role_key
 
@@ -61,8 +55,6 @@ def code_required() -> bool:
 
 
 def _client_ip(request: Request) -> str:
-    # Render sits behind Cloudflare: True-Client-IP is set by the edge. Otherwise use the
-    # right-most X-Forwarded-For hop (added by our proxy) — the left-most one is client-controlled.
     ip = request.headers.get("true-client-ip", "").strip()
     if not ip:
         ip = request.headers.get("x-forwarded-for", "").split(",")[-1].strip()
@@ -70,7 +62,6 @@ def _client_ip(request: Request) -> str:
 
 
 def password_grant(email: str, password: str) -> dict:
-    """Supabase Auth password sign-in, exactly what supabase-js does in the browser."""
     s = get_settings()
     r = httpx.post(f"{s.supabase_url.rstrip('/')}/auth/v1/token", params={"grant_type": "password"},
                    headers={"apikey": _apikey()}, json={"email": email, "password": password}, timeout=15.0)
@@ -86,7 +77,6 @@ class DemoSessionIn(BaseModel):
 
 @router.get("")
 def demo_status() -> dict:
-    """Is one-click judge sign-in available? (Also wakes a sleeping free-tier server.)"""
     return {"enabled": enabled(), "code_required": enabled() and code_required()}
 
 

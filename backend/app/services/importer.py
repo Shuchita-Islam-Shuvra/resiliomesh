@@ -1,4 +1,3 @@
-"""High-volume historical CSV import with dedup + missing-value handling (A08)."""
 from __future__ import annotations
 
 import hashlib
@@ -30,21 +29,19 @@ def clean_events(df: pd.DataFrame, valid_wards: set[str]) -> tuple[pd.DataFrame,
     df["event_date"] = pd.to_datetime(df["event_date"], errors="coerce", format="mixed").dt.date
     for c in NUMERIC:
         df[c] = pd.to_numeric(df[c], errors="coerce")
-        df.loc[df[c] < 0, c] = np.nan                 # negative = sensor error -> missing
+        df.loc[df[c] < 0, c] = np.nan
 
     bad_key = df["event_date"].isna() | ~df["ward_id"].isin(valid_wards)
     report["rejected_invalid_key"] = int(bad_key.sum())
     df = df[~bad_key].copy()
 
     report["missing_values_imputed"] = {c: int(df[c].isna().sum()) for c in NUMERIC}
-    # in-file duplicates: same ward + date -> keep the most complete row
     df["_completeness"] = df[NUMERIC].notna().sum(axis=1)
     df = df.sort_values("_completeness", ascending=False)
     before = len(df)
     df = df.drop_duplicates(subset=["ward_id", "event_date"], keep="first")
     report["duplicates_in_file"] = int(before - len(df))
 
-    # imputation: ward x month median, then global median, then domain default
     df["_month"] = pd.to_datetime(df["event_date"]).dt.month
     defaults = {"rainfall_mm": 40.0, "max_depth_cm": 20.0, "duration_hr": 3.0, "households_affected": 0.0}
     for c in NUMERIC:
@@ -76,7 +73,7 @@ def import_csv(content: bytes, actor_id: str) -> dict:
                         max_depth_cm int, duration_hr numeric, households_affected int, record_hash text) on commit drop""")
         with conn.cursor().copy("copy _hfe_import from stdin") as cp:
             for row in clean.itertuples(index=False):
-                cp.write_row(tuple(v.item() if hasattr(v, "item") else v for v in row))  # numpy -> python
+                cp.write_row(tuple(v.item() if hasattr(v, "item") else v for v in row))
         inserted = conn.execute("""
             with ins as (
               insert into historical_flood_events(ward_id, event_date, rainfall_mm, max_depth_cm, duration_hr,

@@ -1,9 +1,3 @@
-"""Postgres access via psycopg3 connection pool (Supabase direct/pooler connection).
-
-The backend connects with a trusted DB role, so it is the *system* context for
-RLS helper functions. Every transaction records the acting user through
-`set_config('rm.actor', ...)` so audit logs still attribute changes.
-"""
 from __future__ import annotations
 
 import json
@@ -31,7 +25,7 @@ def get_pool() -> ConnectionPool:
             url,
             min_size=1,
             max_size=10,
-            kwargs={"row_factory": dict_row, "prepare_threshold": None},  # pgbouncer-safe
+            kwargs={"row_factory": dict_row, "prepare_threshold": None},
             open=True,
             timeout=10,
         )
@@ -47,7 +41,6 @@ def close_pool() -> None:
 
 @contextmanager
 def tx(actor_id: str | None = None, note: str | None = None) -> Iterator[Connection]:
-    """Run a block inside a single atomic transaction."""
     with get_pool().connection() as conn:
         with conn.transaction():
             if actor_id:

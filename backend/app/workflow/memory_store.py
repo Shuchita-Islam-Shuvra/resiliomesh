@@ -1,8 +1,3 @@
-"""In-memory workflow store with real transactional semantics (snapshot/rollback).
-
-Used by the unit-test suite so workflow, retry and compensation logic can be
-verified deterministically without a database.
-"""
 from __future__ import annotations
 
 import copy
@@ -27,11 +22,12 @@ class MemoryStore:
         self.allocations: dict[str, dict] = {}
         self.tasks: dict[str, dict] = {}
         self.workers: list[str] = ["worker-a", "worker-b"]
+        self.worker_tasks: dict[str, list[str]] = {}
+        self.off_duty: set[str] = set()
         self.notifications: list = []
-        self.fail_notify_times = 0          # simulate flaky gateway
+        self.fail_notify_times = 0
         self._seq = itertools.count(1)
 
-    # -- transactions: snapshot whole state, restore on exception ----------
     @contextmanager
     def transaction(self):
         data_keys = ("runs", "steps", "plans", "incidents", "resources", "allocations", "tasks", "notifications")
@@ -49,7 +45,6 @@ class MemoryStore:
             return "transient"
         return "permanent"
 
-    # -- runs/steps ---------------------------------------------------------
     def get_steps(self, run_id):
         return {name: s["status"] for (rid, name), s in self.steps.items() if rid == run_id}
 
@@ -64,7 +59,6 @@ class MemoryStore:
     def update_run(self, run_id, **fields):
         self.runs[run_id].update(fields)
 
-    # -- plan/incidents --------------------------------------------------
     def load_plan(self, plan_id):
         return copy.deepcopy(self.plans.get(plan_id))
 
@@ -79,7 +73,6 @@ class MemoryStore:
             if self.incidents[i]["status"] in from_statuses:
                 self.incidents[i]["status"] = to_status
 
-    # -- resources: same semantics as rm_reserve_resource -----------------
     def reserve(self, resource_id, qty, key, incident_id, plan_id, actor):
         for a in self.allocations.values():
             if a["idempotency_key"] == key:
@@ -107,19 +100,23 @@ class MemoryStore:
             if a["plan_id"] == plan_id and a["status"] == from_status:
                 a["status"] = to_status
 
-    # -- tasks -------------------------------------------------------------
-    def pick_field_worker(self, incident_id):
+    def pick_field_crew(self, incident_id, task_type, resource_ids, size):
         load = {w: 0 for w in self.workers}
         for t in self.tasks.values():
-            if t["assigned_to"] in load and t["status"] in ("assigned", "accepted", "in_progress"):
-                load[t["assigned_to"]] += 1
-        return min(self.workers, key=lambda w: load[w]) if self.workers else None
+            if t["status"] in ("assigned", "accepted", "in_progress"):
+                for w in t["crew"]:
+                    if w in load:
+                        load[w] += 1
+        fits = [w for w in self.workers if w not in self.off_duty
+                and task_type in self.worker_tasks.get(w, [task_type])]
+        return sorted(fits, key=lambda w: (load[w], self.workers.index(w)))[:size]
 
-    def create_task(self, **t):
+    def create_task(self, *, crew=(), crew_size=1, **t):
         for existing in self.tasks.values():
             if existing["idempotency_key"] == t["idempotency_key"]:
                 return existing
-        task = {**t, "id": str(uuid.uuid4()), "status": "assigned" if t["assigned_to"] else "pending"}
+        task = {**t, "crew": list(crew), "crew_size": crew_size, "id": str(uuid.uuid4()),
+                "status": "assigned" if t["assigned_to"] else "pending"}
         self.tasks[task["id"]] = task
         return task
 
@@ -132,7 +129,7 @@ class MemoryStore:
         return n
 
     def workers_for_run(self, run_id):
-        return sorted({t["assigned_to"] for t in self.tasks.values() if t["run_id"] == run_id and t["assigned_to"]})
+        return sorted({w for t in self.tasks.values() if t["run_id"] == run_id for w in t["crew"]})
 
     def notify(self, run_id, workers):
         if self.fail_notify_times > 0:

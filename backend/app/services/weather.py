@@ -1,13 +1,3 @@
-"""Open-Meteo integration with full fault tolerance (A06).
-
-Resolution order for every request:
-  1. fresh cache (< WEATHER_CACHE_FRESH_MIN)         -> source="cache"
-  2. live API: timeout, retries w/ exponential backoff + jitter, circuit breaker,
-     schema validation of the payload                  -> source="live"
-  3. stale cache (< WEATHER_CACHE_STALE_HOURS)        -> source="stale_cache", degraded
-  4. climatology estimate from local CSV              -> source="climatology", degraded
-The caller always receives a usable, validated summary plus diagnostics.
-"""
 from __future__ import annotations
 
 import csv
@@ -27,7 +17,6 @@ log = logging.getLogger("resiliomesh.weather")
 DHAKA_TZ = timezone(timedelta(hours=6))
 
 
-# ---------------------------------------------------------------- schema
 class _Hourly(BaseModel):
     time: list[str]
     precipitation: list[float | None]
@@ -66,7 +55,6 @@ class UpstreamUnavailable(Exception):
     pass
 
 
-# ---------------------------------------------------------------- breaker
 class CircuitBreaker:
     def __init__(self, threshold: int = 3, reset_s: float = 60, clock=time.monotonic):
         self.threshold, self.reset_s, self.clock = threshold, reset_s, clock
@@ -96,7 +84,6 @@ class CircuitBreaker:
                 self.opened_at = self.clock()
 
 
-# ---------------------------------------------------------------- cache
 class WeatherCache(Protocol):
     def get(self, key: str) -> tuple[dict, datetime] | None: ...
     def put(self, key: str, payload: dict, source: str) -> None: ...
@@ -114,8 +101,6 @@ class MemoryCache:
 
 
 class PgWeatherCache:
-    """Persists the last good payload per ward in Supabase (survives restarts)."""
-
     def __init__(self):
         self.mem = MemoryCache()
 
@@ -130,7 +115,7 @@ class PgWeatherCache:
             if row:
                 self.mem.data[key] = (row["payload"], row["fetched_at"])
                 return row["payload"], row["fetched_at"]
-        except Exception as exc:  # cache must never take the request down
+        except Exception as exc:
             log.warning("weather cache read failed: %s", exc)
         return None
 
@@ -150,7 +135,6 @@ class PgWeatherCache:
             log.warning("weather cache write failed: %s", exc)
 
 
-# ---------------------------------------------------------------- climatology
 _CLIM_DEFAULT = {1: 7, 2: 19, 3: 40, 4: 110, 5: 260, 6: 360, 7: 400, 8: 320, 9: 300, 10: 170, 11: 30, 12: 10}
 _DAYS_DEFAULT = {1: 1, 2: 2, 3: 3, 4: 7, 5: 12, 6: 17, 7: 21, 8: 19, 9: 15, 10: 7, 11: 1, 12: 1}
 
@@ -167,7 +151,6 @@ def load_climatology(path: str | None) -> dict[int, dict]:
     return out
 
 
-# ---------------------------------------------------------------- client
 @dataclass
 class WeatherClient:
     base_url: str = "https://api.open-meteo.com/v1/forecast"
@@ -180,13 +163,12 @@ class WeatherClient:
     transport: httpx.BaseTransport | None = None
     climatology_path: str | None = None
     sleep: callable = time.sleep
-    chaos_mode: str = "normal"          # normal | timeout | malformed | error500 (admin demo)
+    chaos_mode: str = "normal"
 
     def __post_init__(self):
         self.climatology = load_climatology(self.climatology_path)
         self.stats = {"live": 0, "cache": 0, "stale_cache": 0, "climatology": 0, "failures": 0}
 
-    # -- raw call with retries -------------------------------------
     def _fetch_live(self, lat: float, lng: float) -> tuple[dict, int]:
         params = {
             "latitude": round(lat, 4), "longitude": round(lng, 4),
@@ -212,7 +194,7 @@ class WeatherClient:
                     return self._summarise(data), attempts
                 except MalformedResponse as exc:
                     last_exc = exc
-                    break                                    # deterministic error: do not hammer upstream
+                    break
                 except (httpx.TimeoutException, httpx.TransportError, UpstreamUnavailable) as exc:
                     last_exc = exc
                     if attempt < self.max_retries:
@@ -245,12 +227,10 @@ class WeatherClient:
         c = self.climatology[m]
         per_rain_day = c["mean_mm"] / max(c["rainy_days"], 1)
         p = min(1.0, c["rainy_days"] / 30)
-        # conservative (upper-quartile-ish) estimate so fallback never under-warns
         est = round(per_rain_day * 1.3 * (1 if p > 0.4 else p * 2), 1)
         return {"rain_past_24h_mm": est, "rain_next_24h_mm": est, "max_hourly_mm": round(est * 0.3, 1),
                 "max_precip_prob": round(p * 100), "hourly": []}
 
-    # -- public API ------------------------------------------------
     def get(self, key: str, lat: float, lng: float, force_live: bool = False) -> dict:
         now = datetime.now(timezone.utc)
         cached = self.cache.get(key)
@@ -290,7 +270,6 @@ class WeatherClient:
         return {**self._climatology_estimate(), "source": "climatology", "degraded": True, "error": error,
                 "fetched_at": now.isoformat(), "breaker": self.breaker.state}
 
-    # -- chaos engineering (admin demo of A06) ----------------------
     def _chaos_transport(self) -> httpx.BaseTransport | None:
         mode = self.chaos_mode
         if mode == "normal":

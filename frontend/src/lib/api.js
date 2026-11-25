@@ -1,7 +1,5 @@
 import { supabase } from './supabase'
 
-// Unset in a production build = same origin (the FastAPI service also serves this website).
-// Local dev (vite on :5173) talks to uvicorn on :8000 unless VITE_API_URL says otherwise.
 const BASE = (import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:8000' : '')).replace(/\/$/, '')
 
 export class ApiError extends Error {
@@ -18,7 +16,6 @@ async function token() {
   return data.session?.access_token
 }
 
-/** fetch wrapper: auth header, timeout, JSON errors, optional idempotency key */
 export async function api(path, { method = 'GET', body, timeoutMs = 20000, idempotencyKey, form } = {}) {
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), timeoutMs)
@@ -38,7 +35,6 @@ export async function api(path, { method = 'GET', body, timeoutMs = 20000, idemp
     throw new ApiError(0, 'NETWORK', 'Cannot reach the ResilioMesh API.')
   }
   clearTimeout(timer)
-  // a static host without the API answers /api/* with index.html (200): fail loudly, not silently
   if (res.ok && !(res.headers.get('content-type') || '').includes('application/json'))
     throw new ApiError(res.status, 'NO_API', 'This website is not connected to the ResilioMesh API. Set VITE_API_URL to the API address and redeploy.')
   const data = await res.json().catch(() => ({}))
@@ -49,7 +45,6 @@ export async function api(path, { method = 'GET', body, timeoutMs = 20000, idemp
   return data
 }
 
-/** Supabase RPC returning {ok:false, conflict:true, current} on version mismatch */
 export async function rpc(fn, args) {
   const { data, error } = await supabase.rpc(fn, args)
   if (error) throw error

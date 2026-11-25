@@ -5,6 +5,7 @@ import MapView, { ASSET_COLOR, UNASSESSED_COLOR } from '../components/MapView'
 import { Alert, Card, PageHeader, RiskBadge } from '../components/ui'
 import { useAuth } from '../context/AuthContext'
 import { useDebouncedCallback, useRealtime } from '../hooks/useRealtime'
+import { useWardAreas } from '../hooks/useWardAreas'
 import { api } from '../lib/api'
 import { supabase } from '../lib/supabase'
 import { areaLabel } from '../lib/areas'
@@ -13,7 +14,6 @@ import { RISK_COLOR, fmtDateTime, humanize } from '../lib/format'
 const ACTIVE = ['reported', 'verified', 'assessed', 'approved', 'in_progress']
 const RISK_LEVELS = ['low', 'moderate', 'high', 'critical']
 
-/** Type-ahead ward search: pick a ward to zoom the map to it, clear it to see the whole area. */
 function WardSearch({ wards, focus, onSelect, onClear }) {
   const [q, setQ] = useState('')
   const [open, setOpen] = useState(false)
@@ -104,12 +104,17 @@ function Legend({ showAssets }) {
 }
 
 export default function RiskMapPage() {
-  const { isStaff, area, hasRole, profile } = useAuth()
+  const { isStaff, area: staffArea, hasRole, profile } = useAuth()
   const isNgo = hasRole('ngo_coordinator')
+  const wardAreas = useWardAreas()
+  const homeArea = hasRole('citizen') && profile?.ward_id
+    ? (wardAreas.find((w) => w.ward_id === profile.ward_id)?.city_corporation || /^(DNCC|DSCC)/.exec(profile.ward_id)?.[1] || null)
+    : null
+  const area = staffArea || homeArea
   const [myWardIds, setMyWardIds] = useState(() => new Set())
   const nav = useNavigate()
-  const [wards, setWards] = useState([])
-  const [incidents, setIncidents] = useState([])
+  const [allWards, setWards] = useState([])
+  const [allIncidents, setIncidents] = useState([])
   const [assets, setAssets] = useState([])
   const [layers, setLayers] = useState({ wards: true, incidents: true, assets: isStaff })
   const [focusId, setFocusId] = useState('')
@@ -128,7 +133,6 @@ export default function RiskMapPage() {
     setWards((w.data || []).map((x) => ({ ...x, area_km2: areaMap[x.ward_id] })))
     setIncidents(i.data || [])
     setAssets(a.data || [])
-    // NGO coordinators: wards where their own organisation has live allocations (to needs or incidents)
     if (isNgo && profile?.organization_id) {
       const { data: al } = await supabase.from('allocations')
         .select('status, resources!inner(organization_id), community_needs(ward_id), incidents(ward_id)')
@@ -139,6 +143,13 @@ export default function RiskMapPage() {
   useEffect(() => { load() }, [load])
   useRealtime(['incidents', 'wards', 'allocations'], useDebouncedCallback(load, 800))
 
+  const wards = useMemo(() => homeArea ? allWards.filter((w) => w.city_corporation === homeArea) : allWards, [allWards, homeArea])
+  const incidents = useMemo(() => {
+    if (!homeArea) return allIncidents
+    const ids = new Set(wards.map((w) => w.ward_id))
+    return allIncidents.filter((i) => ids.has(i.ward_id))
+  }, [allIncidents, wards, homeArea])
+
   const markedWards = useMemo(() => isNgo ? wards.map((w) => ({ ...w, mine: myWardIds.has(w.ward_id) })) : wards, [wards, isNgo, myWardIds])
   const selected = useMemo(() => wards.find((w) => w.ward_id === focusId) || null, [wards, focusId])
   useEffect(() => {
@@ -147,7 +158,6 @@ export default function RiskMapPage() {
     api(`/api/weather/wards/${focusId}`).then(setWeather).catch((e) => setWxErr(e.message))
   }, [focusId])
 
-  // with a ward in focus, the map shows only that ward's reports and drains
   const shownIncidents = focusId ? incidents.filter((i) => i.ward_id === focusId) : incidents
   const shownAssets = focusId ? assets.filter((a) => a.ward_id === focusId) : assets
   const place = area ? areaLabel(area) : 'Dhaka'
@@ -162,7 +172,7 @@ export default function RiskMapPage() {
   return (
     <>
       <PageHeader title={`Live waterlogging risk map · ${place}`}
-        description={`Each circle is a ward of ${place}, coloured by its AI flood risk. Dots are open citizen reports${isStaff ? ' and squares are drains' : ''}. Search or click a ward to zoom in; clear the search to see the whole area again.`} />
+        description={`Each circle is a ward of ${place}, coloured by its AI flood risk. Dots are open citizen reports${isStaff ? ' and squares are drains' : ''}. Search or click a ward to zoom in; clear the search to see the whole area again.${homeArea ? ` You see ${place} because your home ward is there; you can still report waterlogging anywhere in Dhaka.` : ''}`} />
 
       <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
         {stats.map(({ label, value, icon: Icon, warn }) => (
@@ -196,7 +206,7 @@ export default function RiskMapPage() {
               <button type="button" onClick={() => setFocusId('')} className="rounded-full border border-slate-300 px-2.5 py-0.5 text-xs font-medium text-slate-700 hover:bg-slate-50">Show all of {place}</button>
             </div>
           )}
-          <MapView height="h-[65vh] min-h-[380px]" basemap="satellite" wards={layers.wards ? markedWards : []} incidents={layers.incidents ? shownIncidents : []}
+          <MapView height="h-[65vh] min-h-[380px]" basemap="satellite" area={area} wards={layers.wards ? markedWards : []} incidents={layers.incidents ? shownIncidents : []}
             assets={layers.assets ? shownAssets : []} focusWard={selected} onWardClick={(w) => setFocusId(w.ward_id)}
             onIncidentClick={isStaff ? (i) => nav(`/incidents/${i.id}`) : undefined} />
           <Legend showAssets={isStaff} />

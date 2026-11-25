@@ -1,25 +1,7 @@
-"""Event-driven multi-step workflow engine with retries + saga compensation (A07).
-
-dispatch_plan workflow
-  1. validate_plan       plan approved & incidents still approved
-  2. reserve_resources   atomic, idempotent stock reservations (A05)
-  3. create_tasks        one task per incident x task type, auto-assigned to least-loaded worker
-  4. notify_teams        push notification to assigned workers (external-style step)
-  5. activate_incidents  incidents -> in_progress, allocations -> dispatched, plan -> executed
-
-Guarantees
-  * Each step runs in ONE DB transaction together with its own "succeeded" marker,
-    so a crash can never leave a half-applied step; on resume succeeded steps are skipped.
-  * Every side effect is keyed by an idempotency key derived from run id.
-  * Transient failures -> exponential backoff retry (run.status = retrying).
-  * Permanent failure / retries exhausted -> compensation in reverse:
-      cancel tasks, release reservations, incidents back to 'assessed', plan 'failed'.
-  * If compensation itself crashes the run stays 'compensating' and the worker
-    re-claims it after the lock timeout and finishes compensation.
-"""
 from __future__ import annotations
 
 import logging
+import math
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
@@ -39,13 +21,24 @@ TASK_TITLE = {
     "evacuation_support": "Boat evacuation support",
 }
 
+PEOPLE_PER_UNIT = {
+    "pump": 1.0, "crew": 2.0, "boat": 2.0, "water_tank": 1.0,
+    "relief_kit": 0.02, "sandbag": 0.02, "medical_kit": 0.05,
+}
+MAX_CREW = 4
+
+
+def crew_size(units: dict) -> int:
+    need = sum(PEOPLE_PER_UNIT.get(rt, 0.5) * max(int(q), 0) for rt, q in units.items())
+    return max(1, min(MAX_CREW, math.ceil(need)))
+
 
 class TransientError(Exception):
-    """Retryable (network blip, lock timeout, notification gateway down)."""
+    pass
 
 
 class PermanentError(Exception):
-    """Not retryable (business rule violated, e.g. stock no longer available)."""
+    pass
 
 
 def utcnow() -> datetime:
@@ -57,7 +50,6 @@ class WorkflowEngine:
         self.store = store
         self.backoff_base_s = backoff_base_s
 
-    # ------------------------------------------------------------------
     def execute(self, run: dict) -> dict:
         run_id = run["id"]
         if run["status"] == "compensating":
@@ -75,7 +67,7 @@ class WorkflowEngine:
                         raise TransientError(f"Injected failure at step '{name}' (fault-injection test)")
                     output = getattr(self, f"_step_{name}")(tx, run)
                     tx.mark_step(run_id, name, order, "succeeded", output=output)
-            except Exception as exc:  # noqa: BLE001 — classify everything
+            except Exception as exc:
                 kind = self.store.classify(exc)
                 err = f"{name}: {exc}"
                 self.store.mark_step(run_id, name, order, "failed", error=str(exc))
@@ -92,7 +84,6 @@ class WorkflowEngine:
                               last_error=None, locked_by=None)
         return {"status": "succeeded"}
 
-    # ------------------------------------------------------------------ steps
     def _step_validate_plan(self, tx, run):
         plan = tx.load_plan(run["plan_id"])
         if plan is None:
@@ -121,20 +112,27 @@ class WorkflowEngine:
 
     def _step_create_tasks(self, tx, run):
         plan = tx.load_plan(run["plan_id"])
-        by_incident: dict[str, set] = defaultdict(set)
+        jobs: dict[str, dict] = defaultdict(dict)
         for a in plan["assignments"]:
-            by_incident[a["incident_id"]].add(TASK_TYPE_FOR.get(a["resource_type"], "inspection"))
+            ttype = TASK_TYPE_FOR.get(a["resource_type"], "inspection")
+            job = jobs[a["incident_id"]].setdefault(ttype, {"units": defaultdict(int), "resource_ids": []})
+            job["units"][a["resource_type"]] += int(a["quantity"])
+            job["resource_ids"].append(a["resource_id"])
         created = []
-        for incident_id, types in by_incident.items():
-            for ttype in sorted(types):
-                worker = tx.pick_field_worker(incident_id)
+        for incident_id, by_type in jobs.items():
+            for ttype in sorted(by_type):
+                job = by_type[ttype]
+                size = crew_size(job["units"])
+                crew = tx.pick_field_crew(incident_id, ttype, job["resource_ids"], size)
+                lead = crew[0] if crew else None
                 task = tx.create_task(
                     incident_id=incident_id, plan_id=plan["id"], run_id=run["id"], task_type=ttype,
-                    title=TASK_TITLE[ttype], assigned_to=worker,
+                    title=TASK_TITLE[ttype], assigned_to=lead, crew=crew, crew_size=size,
                     idempotency_key=f"run:{run['id']}:g{run.get('generation', 1)}:task:{incident_id}:{ttype}",
                     due_at=utcnow() + timedelta(hours=4),
                 )
-                created.append({"task_id": str(task["id"]), "type": ttype, "assigned_to": worker})
+                created.append({"task_id": str(task["id"]), "type": ttype, "assigned_to": lead,
+                                "crew": crew, "crew_size": size})
         return {"tasks": created}
 
     def _step_notify_teams(self, tx, run):
@@ -149,7 +147,6 @@ class WorkflowEngine:
         tx.set_plan_status(plan["id"], "executed")
         return {"activated": len(plan["incident_ids"])}
 
-    # ------------------------------------------------------------------ saga
     def _compensate(self, run: dict, reason: str) -> dict:
         run_id = run["id"]
         self.store.update_run(run_id, status="compensating", last_error=reason)
@@ -169,7 +166,7 @@ class WorkflowEngine:
             log.info("run %s compensated: %s tasks cancelled, %s allocations released", run_id, cancelled, released)
             return {"status": "compensated", "reason": reason, "tasks_cancelled": cancelled,
                     "allocations_released": released}
-        except Exception as exc:  # leave in 'compensating' -> worker resumes after lock timeout
+        except Exception as exc:
             log.exception("compensation failed for run %s", run_id)
             self.store.update_run(run_id, status="compensating", last_error=f"compensation error: {exc}")
             return {"status": "compensating", "error": str(exc)}

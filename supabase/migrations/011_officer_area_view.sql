@@ -1,31 +1,9 @@
--- =====================================================================
--- ResilioMesh — 011 officers SEE only their own area
--- ---------------------------------------------------------------------
--- Migration 009 limited what a Water Resilience Officer (role `city_officer`) may
--- CHANGE to their area (Dhaka North = DNCC, Dhaka South = DSCC) but let them
--- read the whole city. From this migration an officer also only SEES their
--- own area: wards, incidents (+ history, risk assessments), drainage assets,
--- community needs, resources, plans, allocations, tasks, workflow runs and
--- steps, historical flood events, and the two dashboard RPCs.
---
---   * An officer always sees their own reports and their own authority's
---     resources, wherever they are.
---   * An officer whose authority has no area sees nothing area-bound (fail-safe).
---   * Admins, NGO coordinators, field workers and citizens are unchanged.
---
--- Requires 009. Re-runnable. If you re-run 003_rls.sql or 004_rpc.sql,
--- run 009 and then this file again.
--- =====================================================================
-
--- ---------- 1. Helpers ----------------------------------------------------
--- May the caller SEE rows of this ward? true for every role except officers.
 create or replace function public.rm_sees_ward(p_ward text) returns boolean
 language sql stable security definer set search_path = public as $$
   select rm_role() is distinct from 'city_officer'
       or exists (select 1 from wards w where w.id = p_ward and w.city_corporation = rm_area())
 $$;
 
--- every incident of the list is in the caller's view (plans, workflow runs)
 create or replace function public.rm_sees_incidents(p_incident_ids uuid[]) returns boolean
 language sql stable security definer set search_path = public as $$
   select rm_role() is distinct from 'city_officer'
@@ -65,7 +43,6 @@ grant execute on function public.rm_sees_need(uuid) to authenticated;
 grant execute on function public.rm_sees_plan(uuid) to authenticated;
 grant execute on function public.rm_sees_run(uuid) to authenticated;
 
--- ---------- 2. Read policies ---------------------------------------------
 drop policy if exists wards_read on wards;
 create policy wards_read on wards for select to anon, authenticated
   using (rm_sees_ward(id));
@@ -122,7 +99,6 @@ drop policy if exists hfe_read on historical_flood_events;
 create policy hfe_read on historical_flood_events for select to authenticated
   using (rm_is_staff() and rm_sees_ward(ward_id));
 
--- ---------- 3. Dashboard RPCs (SECURITY DEFINER, so they filter themselves) --
 create or replace function public.ward_risk_summary()
 returns table(ward_id text, name text, city_corporation text, lat double precision, lng double precision,
               population integer, risk_score numeric, risk_level risk_level, risk_updated_at timestamptz,
@@ -154,7 +130,7 @@ begin
   end if;
   v_from := now() - make_interval(days => p_days);
 
-  with vw as (                       -- wards the caller may see (officers: own area only)
+  with vw as (
     select * from wards where rm_sees_ward(id) and (p_ward is null or id = p_ward)
   ), inc as (
     select * from incidents

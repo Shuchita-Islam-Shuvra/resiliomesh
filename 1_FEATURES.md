@@ -13,15 +13,15 @@ Track: **World Problem Solver**. Declared advanced challenges: **A02** and **A05
 | Citizen | Report waterlogging, track their own reports, see risk for their ward |
 | Water Resilience Officer (Dhaka North or Dhaka South) | The water: verify reports, run AI assessment, plan and approve pump & crew dispatch (the only role besides admin that can) in their own area; read-only elsewhere |
 | NGO coordinator (home area Dhaka North or South, one NGO per person) | Responsible for community needs in their own area: log, allocate own NGO's stock, track dispatch / delivery, cancel. Can ask the other area for backup (one need or the whole area) and help the other area when asked; an area with no coordinator is open to all. One person holds one coordinator post; a move to another NGO is a two-admin transfer, a move to the other area is admin-only. Reads reports (can log a relief need from one) but never changes them or approves pump / crew plans |
-| Field worker (city-wide) | Receive tasks anywhere in Dhaka, work offline, update task status |
-| Admin | Users and roles, audit log, system health, fault injection |
+| Field worker (city crews: own area; NGO crews: city-wide) | Work in crews: each task gets a crew sized to the job (1 per pump, 2 per boat, about 1 per 50 kits, at most 4) with one lead. The crew is picked by team/skill, the stock owner's own people first, on-duty only, then least busy. Any crew member can update status, offline too, and device GPS is recorded at start and finish. A worker can go on or off duty, can decline a task before accepting it (with a reason; a replacement is picked automatically, otherwise the officer is told), and can report a problem after accepting without a fake start (migration 020). Officers see every task with no crew, a failure, a decline, short staffing or a missed due time in a live "Field crews need attention" list and assign or adjust crews from there. Field workers can never cancel a task |
+| Admin (two admins, two jobs) | **System owner**: platform set-up (official domains, NGOAB numbers, staff roster, NGOAB registry) and fault injection. **Security & audit officer**: reviews access, audit log, revokes at once. Both approve access under the two-person rule; neither can change their own duty (migration 021) |
 
 ## Frontend pages (React 19 + Vite + Tailwind, PWA)
 
 | Page | Route | Main features |
 |---|---|---|
 | Login / Register / Setup | `/login`, `/register` | Supabase Auth, validation, setup screen when env vars are missing |
-| Dashboard | `/dashboard` | Different dashboard per role (staff, citizen, field, NGO). Live counters, high-risk wards, work queues, resource utilisation |
+| Dashboard | `/dashboard` | Different dashboard per role (staff, citizen, field, NGO). Live counters, high-risk wards, work queues, resource utilisation. Officers: live "Field crews need attention" list ranked by urgency. Field workers: duty status, team, next tasks by due time |
 | Live Risk Map | `/map` | Leaflet map of wards, risk colour per ward, drainage assets, live updates |
 | Reports & Assets | `/incidents` | Server-side search, 4 filters, sortable columns, pagination. Drainage asset CRUD |
 | Report incident | `/incidents/new` | Pick location on map, depth, photos, offline-safe submit, duplicate detection |
@@ -30,7 +30,7 @@ Track: **World Problem Solver**. Declared advanced challenges: **A02** and **A05
 | Resources & Allocation | `/resources` | Inventory CRUD, run the optimiser, see shortages, approve plans |
 | NGO Coordination | `/ngo` | Register community needs, duplicate-aid detection, allocate stock |
 | Workflows & Tasks | `/workflows` | Dispatch workflow runs, step status, retries, compensation, manual retry |
-| Field Portal | `/field` | Task list cached on the device, accept / start / complete, works offline |
+| Field Portal | `/field` | Crew tasks cached on the device (with crew phone numbers), accept / start / complete / report a problem, decline before accepting, on/off duty switch, overdue badge, GPS proof with feedback, works offline. Filter chips with counts (new, working, overdue, problem), search by ward / report code / title, sort by due time. Double taps never queue the same change twice. A toast announces each new assignment as it arrives |
 | Analytics | `/analytics` | Percentiles, utilisation, per-ward / month / year charts, bulk CSV import |
 | Audit & Admin | `/admin` | User and role management, audit log, API health, chaos switch |
 

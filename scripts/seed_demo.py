@@ -1,15 +1,3 @@
-"""Create demo accounts + realistic sample operations data.
-
-Prereqs: migrations 001-008 and supabase/seed.sql already applied.
-
-    cd backend
-    # backend/.env must contain SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, DATABASE_URL
-    set DEMO_PASSWORD=<choose-a-strong-password>        (PowerShell: $env:DEMO_PASSWORD="...")
-    .venv\\Scripts\\python ..\\scripts\\seed_demo.py
-
-Idempotent: re-running updates existing users and skips existing sample data.
-The password is never written to the repository.
-"""
 from __future__ import annotations
 
 import os
@@ -25,10 +13,10 @@ from psycopg.rows import dict_row
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "backend"))
-from app.core.config import get_settings  # noqa: E402
-from app.ml.features import monsoon_factor  # noqa: E402
-from app.ml.model import get_model  # noqa: E402
-from app.ml.rules import apply_rules, priority  # noqa: E402
+from app.core.config import get_settings
+from app.ml.features import monsoon_factor
+from app.ml.model import get_model
+from app.ml.rules import apply_rules, priority
 
 ORG = {
     "north": "11111111-1111-1111-1111-111111111101",
@@ -37,28 +25,39 @@ ORG = {
     "nodi": "11111111-1111-1111-1111-111111111104",
     "ops": "11111111-1111-1111-1111-111111111105",
 }
-# sign-in IDs shown on the login page's demo box (Water Resilience Officer / Field Worker / Admin)
 STAFF_IDS = {
     "admin@resiliomesh.demo": "ADM-001", "admin2@resiliomesh.demo": "ADM-002", "officer@resiliomesh.demo": "DSCC-OFF-01", "officer2@resiliomesh.demo": "DNCC-OFF-02",
     "field1@resiliomesh.demo": "FW-001", "field2@resiliomesh.demo": "FW-002", "field3@resiliomesh.demo": "FW-003",
+    "field4@resiliomesh.demo": "FW-004", "field5@resiliomesh.demo": "FW-005", "field6@resiliomesh.demo": "FW-006",
+    "field7@resiliomesh.demo": "FW-007",
+}
+ADMIN_SCOPE = {"admin@resiliomesh.demo": "owner", "admin2@resiliomesh.demo": "reviewer"}
+FIELD_TEAM = {
+    "field1@resiliomesh.demo": "Drainage crew", "field2@resiliomesh.demo": "Pump operator",
+    "field3@resiliomesh.demo": "Relief distribution", "field4@resiliomesh.demo": "Pump operator",
+    "field5@resiliomesh.demo": "Drainage crew", "field6@resiliomesh.demo": "Drainage crew",
+    "field7@resiliomesh.demo": "Medical / first aid",
 }
 USERS = [
     ("admin@resiliomesh.demo", "Farhana Rahman", "admin", "ops", None),
-    ("admin2@resiliomesh.demo", "Kamal Hossain", "admin", "ops", None),       # second approver (two-person rule)
+    ("admin2@resiliomesh.demo", "Kamal Hossain", "admin", "ops", None),
     ("officer@resiliomesh.demo", "Tanvir Hasan", "city_officer", "south", "DSCC-04"),
     ("officer2@resiliomesh.demo", "Nusrat Jahan", "city_officer", "north", "DNCC-05"),
     ("ngo@resiliomesh.demo", "Sabrina Akter", "ngo_coordinator", "shobar", "DSCC-01"),
-    ("ngo2@resiliomesh.demo", "Mahmud Karim", "ngo_coordinator", "nodi", "DNCC-05"),   # Dhaka North coordinator (014)
+    ("ngo2@resiliomesh.demo", "Mahmud Karim", "ngo_coordinator", "nodi", "DNCC-05"),
     ("field1@resiliomesh.demo", "Rafiqul Islam", "field_worker", "south", "DSCC-02"),
     ("field2@resiliomesh.demo", "Shahidul Alam", "field_worker", "north", "DNCC-02"),
     ("field3@resiliomesh.demo", "Mitu Begum", "field_worker", "shobar", "DSCC-06"),
     ("citizen@resiliomesh.demo", "Arif Chowdhury", "citizen", None, "DSCC-02"),
     ("citizen2@resiliomesh.demo", "Lamia Sultana", "citizen", None, "DNCC-02"),
+    ("field4@resiliomesh.demo", "Jahangir Alam", "field_worker", "south", "DSCC-05"),
+    ("field5@resiliomesh.demo", "Rubina Khatun", "field_worker", "north", "DNCC-08"),
+    ("field6@resiliomesh.demo", "Sohel Rana", "field_worker", "south", "DSCC-03"),
+    ("field7@resiliomesh.demo", "Nasima Akter", "field_worker", "nodi", "DNCC-04"),
 ]
 
 DEMO_PHONE = {email: f"+88017000002{i:02d}" for i, (email, *_rest) in enumerate(USERS)}
 
-# realistic report templates: (ward, category, title, description, depth, people, severity)
 REPORTS = [
     ("DSCC-02", "waterlogging", "Knee-deep water at Shantinagar crossing", "Water up to knees after 2 hours of rain. Rickshaws stuck, shops along Bazar Road taking water.", 48, 450, 5),
     ("DSCC-03", "blocked_drain", "Malibagh railgate drain choked with plastic", "Drain mouth completely blocked by polythene and market waste. Water not flowing.", 22, 120, 3),
@@ -105,7 +104,7 @@ def main() -> None:
 
     base = s.supabase_url.rstrip("/")
     headers = {"apikey": s.supabase_service_role_key}
-    if not s.supabase_service_role_key.startswith("sb_"):      # legacy JWT-style service_role key
+    if not s.supabase_service_role_key.startswith("sb_"):
         headers["Authorization"] = f"Bearer {s.supabase_service_role_key}"
     ids = {}
     with httpx.Client(headers=headers, timeout=30) as client:
@@ -120,14 +119,24 @@ def main() -> None:
         for email, name, role, org, ward in USERS:
             conn.execute("""update profiles set full_name=%s, role=%s, organization_id=%s, ward_id=%s, is_active=true, email=%s
                             where id=%s""", (name, role, ORG[org] if org else None, ward, email, ids[email]))
-            if email in STAFF_IDS:   # role-specific sign-in ID (migration 007)
+            if email in STAFF_IDS:
                 conn.execute("savepoint sid")
                 try:
                     conn.execute("update profiles set employee_id=%s where id=%s", (STAFF_IDS[email], ids[email]))
                 except psycopg.errors.UndefinedColumn:
                     conn.execute("rollback to savepoint sid")
-            # demo-only: a +880 number marked as SMS-verified so the demo still works when
-            # security_settings.require_phone_verification is switched on (migration 008)
+            if email in ADMIN_SCOPE:
+                conn.execute("savepoint scope")
+                try:
+                    conn.execute("update profiles set admin_scope=%s where id=%s", (ADMIN_SCOPE[email], ids[email]))
+                except psycopg.errors.UndefinedColumn:
+                    conn.execute("rollback to savepoint scope")
+            if email in FIELD_TEAM:
+                conn.execute("savepoint team")
+                try:
+                    conn.execute("update profiles set field_team=%s, on_duty=true where id=%s", (FIELD_TEAM[email], ids[email]))
+                except psycopg.errors.UndefinedColumn:
+                    conn.execute("rollback to savepoint team")
             conn.execute("savepoint phone")
             try:
                 conn.execute("update profiles set phone=%s, phone_verified_at=coalesce(phone_verified_at, now()) where id=%s",
@@ -179,13 +188,12 @@ def main() -> None:
                               Jsonb(ml["contributions"]), Jsonb(r["rules_fired"]), officer))
             print(f"incident {status:<11} {title}")
 
-        # community needs incl. one deliberate duplicate
         needs = [("DSCC-10", "relief_kit", 70, 70, "Rokeya Begum", "+8801711000001"),
                  ("DSCC-10", "water_tank", 1, 70, "Rokeya Begum", "+8801711000001"),
                  ("DSCC-09", "medical_kit", 40, 36, "Hazaribagh Youth Club", "+8801711000002"),
                  ("DSCC-05", "relief_kit", 55, 55, "Mugda Ward Committee", "+8801711000003"),
                  ("DSCC-06", "relief_kit", 30, 30, "Jatrabari Imam", "+8801711000004"),
-                 ("DSCC-05", "relief_kit", 55, 55, "Mugda Ward Committee", "+880-1711-000003")]  # duplicate (phone normalised)
+                 ("DSCC-05", "relief_kit", 55, 55, "Mugda Ward Committee", "+880-1711-000003")]
         for wid, t, q, h, cn, cp in needs:
             conn.execute("""insert into community_needs(ward_id, need_type, quantity, households, contact_name, contact_phone, dedup_key, submitted_by)
                             values (%s,%s,%s,%s,%s,%s,'x',%s)""", (wid, t, q, h, cn, cp.replace("-", ""), ids["ngo@resiliomesh.demo"]))

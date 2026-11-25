@@ -1,40 +1,10 @@
--- =====================================================================
--- ResilioMesh — 008 identity verification & anti-impersonation
--- ---------------------------------------------------------------------
--- Closes the gaps in the staff / citizen identity model:
---   1. Staff ID was only checked in the browser
---        → staff privileges are bound to a server-verified session.
---          A password-only session (e.g. straight to the Supabase API) gets
---          citizen-level access until rm_verify_staff_login() accepts the
---          Employee / Staff / Admin ID (or the NGO), and — when the account
---          has an authenticator app or its role requires one — until the
---          session reaches AAL2 (TOTP).
---   2. Official e-mail domains   → organizations.email_domains, enforced on
---                                  sign-up and again on approval
---   3. Employee ID roster         → staff_roster + live "Verified / flag" check
---   4. NGOAB registration         → ngo_registry + live check
---   5. ID card / appointment letter → private storage bucket + documents table
---   6. Single-admin approval      → role_request_approvals, two different
---                                  admins for sensitive / flagged requests;
---                                  admins can no longer promote directly
---   7. Phone                      → Bangladeshi mobiles only (+8801XXXXXXXXX),
---                                  OTP-verified flag synced from auth.users
---   8. Citizen country / GPS spoofing → Dhaka service area, location ↔ ward
---                                  check, per-citizen rate limits, trust flags
---                                  (foreign / Tor network, outside home area)
--- Tunables live in security_settings (one row, editable only from the SQL
--- editor / service connection, never from the browser).
--- Run after 007_staff_login_ids.sql. Re-runnable.
--- =====================================================================
-
--- ---------- 0. Security settings -------------------------------------
 create table if not exists security_settings (
   id                          boolean primary key default true check (id),
   staff_session_hours         integer not null default 12 check (staff_session_hours between 1 and 168),
   staff_id_max_failures       integer not null default 5  check (staff_id_max_failures between 3 and 20),
   staff_id_lock_minutes       integer not null default 15 check (staff_id_lock_minutes between 1 and 1440),
   mfa_required_roles          app_role[] not null default '{}',
-  require_phone_verification  boolean not null default false,   -- turn on once an SMS provider is configured
+  require_phone_verification  boolean not null default false,
   require_official_email      boolean not null default true,
   require_email_confirmed     boolean not null default true,
   require_documents           boolean not null default true,
@@ -47,7 +17,7 @@ create table if not exists security_settings (
   updated_at                  timestamptz not null default now()
 );
 insert into security_settings (id) values (true) on conflict (id) do nothing;
-alter table security_settings enable row level security;   -- no policies: browser can neither read nor write it
+alter table security_settings enable row level security;
 revoke all on security_settings from anon, authenticated;
 
 drop trigger if exists trg_touch_security_settings on security_settings;
@@ -57,7 +27,6 @@ drop trigger if exists trg_audit_security_settings on security_settings;
 create trigger trg_audit_security_settings after insert or update or delete on security_settings
   for each row execute function rm_audit();
 
--- Non-sensitive switches the UI needs (which steps to show).
 create or replace function public.rm_public_security_settings() returns jsonb
 language sql stable security definer set search_path = public as $$
   select jsonb_build_object(
@@ -73,8 +42,6 @@ language sql stable security definer set search_path = public as $$
 $$;
 grant execute on function public.rm_public_security_settings() to anon, authenticated;
 
--- ---------- 1. Small helpers -----------------------------------------
--- Bangladeshi mobile → E.164 (+8801XXXXXXXXX). NULL when it is not one.
 create or replace function public.rm_normalize_bd_phone(p text) returns text
 language sql immutable as $$
   select case
@@ -101,7 +68,6 @@ language sql immutable as $$
     'temp-mail.org','10minutemail.com','yopmail.com','sharklasers.com'])
 $$;
 
--- domain equals an allowed domain or is a sub-domain of it
 create or replace function public.rm_domain_matches(p_domain text, p_allowed text[]) returns boolean
 language sql immutable as $$
   select p_domain is not null and exists (
@@ -109,8 +75,6 @@ language sql immutable as $$
     where p_domain = lower(a) or p_domain like '%.' || lower(a))
 $$;
 
--- Session id / assurance level of the calling JWT (PostgREST & Realtime set request.jwt.claims).
--- (plain SQL, no exception block: this runs inside every RLS check)
 create or replace function public.rm_jwt_claims() returns jsonb
 language sql stable as $$
   select coalesce(nullif(current_setting('request.jwt.claims', true), '')::jsonb, '{}'::jsonb)
@@ -127,9 +91,6 @@ language sql stable as $$
   select coalesce(nullif(rm_jwt_claims()->>'aal', ''), 'aal1')
 $$;
 
--- Country of the HTTP caller as reported by the CDN in front of Supabase
--- (Cloudflare overwrites cf-ipcountry on ingress, so clients cannot forge it).
--- NULL when not available. 'T1' = Tor exit node.
 create or replace function public.rm_request_country() returns text
 language plpgsql stable as $$
 declare h jsonb;
@@ -139,9 +100,6 @@ begin
 exception when others then return null;
 end $$;
 
--- MFA factor / live-session lookups. auth.* is managed by Supabase; if this
--- role cannot read it, the helpers degrade gracefully (MFA still enforced for
--- the roles listed in security_settings.mfa_required_roles via the JWT aal).
 do $$
 begin
   if to_regclass('auth.mfa_factors') is not null and has_table_privilege('auth.mfa_factors', 'select') then
@@ -169,11 +127,9 @@ begin
   end if;
 end $$;
 
--- ---------- 2. Profiles: verified phone / e-mail, BD-only phones ------
 alter table profiles add column if not exists phone_verified_at timestamptz;
 alter table profiles add column if not exists email_verified_at timestamptz;
 
--- existing data: normalise to +880…, drop anything that is not a BD mobile
 update profiles set phone = rm_normalize_bd_phone(phone)
  where phone is not null and phone is distinct from rm_normalize_bd_phone(phone);
 alter table profiles drop constraint if exists profiles_phone_check;
@@ -188,7 +144,6 @@ alter table community_needs drop constraint if exists chk_needs_phone_bd;
 alter table community_needs add constraint chk_needs_phone_bd
   check (contact_phone is null or contact_phone ~ '^\+8801[3-9][0-9]{8}$');
 
--- normalise on the way in, with a readable error for foreign / malformed numbers
 create or replace function public.rm_profile_normalize() returns trigger
 language plpgsql as $$
 declare v text;
@@ -203,13 +158,11 @@ begin
   end if;
   return new;
 end $$;
--- name sorts before trg_guard_profile so the guard compares normalised numbers
 drop trigger if exists trg_profile_normalize on profiles;
 drop trigger if exists trg_aa_profile_normalize on profiles;
 create trigger trg_aa_profile_normalize before insert or update of phone on profiles
   for each row execute function rm_profile_normalize();
 
--- backfill verification timestamps from auth.users (system context: allowed by the guard)
 do $$
 begin
   execute $q$
@@ -227,10 +180,6 @@ exception when undefined_column or insufficient_privilege then
   raise notice 'auth.users verification columns not readable — skipping backfill';
 end $$;
 
--- Only admins (or the backend/system) may change role / org / active flag / staff ID.
--- Privilege GRANTS (promotion, org or staff-ID change of a staff account,
--- re-activating a staff account) must go through the two-person request flow.
--- Verification timestamps and e-mail are owned by Supabase Auth (synced by trigger).
 create or replace function public.rm_guard_profile() returns trigger
 language plpgsql security definer set search_path = public as $$
 declare v_grant boolean := coalesce(current_setting('rm.role_grant', true), 'off') = 'on';
@@ -243,10 +192,9 @@ begin
          and new.phone is not distinct from old.phone) then
     raise exception 'FORBIDDEN: e-mail and verification status are managed by sign-in, not editable' using errcode = '42501';
   end if;
-  -- a changed number is unverified until the OTP for it is confirmed
   if new.phone is distinct from old.phone then new.phone_verified_at := null; end if;
 
-  if v_grant then return new; end if;     -- inside rm_review_role_request (two-person approved)
+  if v_grant then return new; end if;
 
   if (new.role is distinct from old.role
       or new.organization_id is distinct from old.organization_id
@@ -277,7 +225,6 @@ begin
   return new;
 end $$;
 
--- ---------- 3. Effective role: staff privileges need a verified session ----
 create table if not exists staff_sessions (
   session_id      uuid primary key,
   user_id         uuid not null references profiles(id) on delete cascade,
@@ -316,7 +263,6 @@ begin
   if v_role is null or not v_active then return null; end if;
   if v_role = 'citizen' then return 'citizen'; end if;
 
-  -- staff: this exact session must have passed the server-side staff-ID check
   if p_session is null or not exists (
        select 1 from staff_sessions s
         where s.session_id = p_session and s.user_id = p_uid and s.role = v_role
@@ -325,7 +271,6 @@ begin
     return 'citizen';
   end if;
 
-  -- second factor: required when the account has an authenticator or the role demands one
   if coalesce(p_aal, 'aal1') <> 'aal2' then
     select mfa_required_roles into v_mfa_roles from security_settings where id;
     if v_role = any(coalesce(v_mfa_roles, '{}')) or rm_mfa_enrolled(p_uid) then
@@ -359,8 +304,6 @@ drop policy if exists staff_attempts_read on staff_login_attempts;
 create policy staff_attempts_read on staff_login_attempts for select to authenticated
   using (user_id = auth.uid() or rm_role() = 'admin');
 
--- Second sign-in step for staff. Returns JSON (never raises on a wrong ID) so
--- the failed attempt is committed and counts towards the lock-out.
 create or replace function public.rm_verify_staff_login(
   p_role app_role, p_staff_id text default null, p_org_id uuid default null)
 returns jsonb
@@ -386,7 +329,6 @@ begin
     return jsonb_build_object('ok', false, 'code', 'ROLE_MISMATCH', 'actual_role', p.role);
   end if;
 
-  -- lock-out after repeated wrong IDs (per account, sliding window)
   select count(*), max(created_at) into v_fails, v_until from staff_login_attempts
    where user_id = v_uid and not succeeded and reason in ('ID_MISMATCH','ORG_MISMATCH')
      and created_at > now() - make_interval(mins => s.staff_id_lock_minutes)
@@ -403,7 +345,7 @@ begin
       v_ok := upper(btrim(p.employee_id)) = upper(btrim(coalesce(p_staff_id, '')));
       if not v_ok then v_reason := 'ID_MISMATCH'; end if;
     end if;
-  else  -- ngo_coordinator: the NGO is the second identifier
+  else
     v_ok := p.organization_id is not null and p.organization_id = p_org_id;
     if not v_ok then v_reason := 'ORG_MISMATCH'; end if;
   end if;
@@ -423,7 +365,7 @@ begin
   on conflict (session_id) do update
      set role = excluded.role, organization_id = excluded.organization_id, verified_at = now(),
          expires_at = excluded.expires_at, request_country = excluded.request_country
-   where staff_sessions.user_id = excluded.user_id;          -- a session id can never be re-bound to another user
+   where staff_sessions.user_id = excluded.user_id;
   get diagnostics v_n = row_count;
   if v_n = 0 then return jsonb_build_object('ok', false, 'code', 'SESSION_INVALID'); end if;
 
@@ -440,7 +382,6 @@ language sql volatile security definer set search_path = public as $$
 $$;
 grant execute on function public.rm_end_staff_session() to authenticated;
 
--- What the UI needs to decide which verification step to show.
 create or replace function public.rm_session_status() returns jsonb
 language plpgsql stable security definer set search_path = public as $$
 declare
@@ -470,7 +411,6 @@ begin
 end $$;
 grant execute on function public.rm_session_status() to authenticated;
 
--- ---------- 4. Organisations: official domains, NGOAB number -----------
 alter table organizations add column if not exists email_domains text[] not null default '{}';
 alter table organizations add column if not exists ngoab_registration_no text;
 
@@ -500,7 +440,6 @@ update organizations set email_domains = '{dncc.gov.bd}'
 update organizations set email_domains = '{dscc.gov.bd}'
  where id = '11111111-1111-1111-1111-111111111102' and email_domains = '{}';
 
--- public org list for the sign-up / sign-in forms now includes official domains
 drop function if exists public.rm_public_organizations();
 create function public.rm_public_organizations()
 returns table (id uuid, name text, type org_type, email_domains text[])
@@ -510,7 +449,6 @@ language sql stable security definer set search_path = public as $$
 $$;
 grant execute on function public.rm_public_organizations() to anon, authenticated;
 
--- ---------- 5. Official registries: staff roster, NGOAB list ------------
 create table if not exists staff_roster (
   id              uuid primary key default gen_random_uuid(),
   organization_id uuid not null references organizations(id) on delete cascade,
@@ -580,8 +518,6 @@ drop trigger if exists trg_audit_ngo_registry on ngo_registry;
 create trigger trg_audit_ngo_registry after insert or update or delete on ngo_registry
   for each row execute function rm_audit();
 
--- Bulk import (CSV parsed in the browser). p_replace deactivates roster rows
--- of this organisation that are not in the new file (kept for the audit trail).
 create or replace function public.rm_import_staff_roster(p_org uuid, p_rows jsonb, p_replace boolean default false)
 returns jsonb
 language plpgsql volatile security definer set search_path = public as $$
@@ -667,7 +603,6 @@ begin
 end $$;
 grant execute on function public.rm_import_ngo_registry(jsonb) to authenticated;
 
--- demo registry rows (fictional organisations from seed.sql)
 insert into ngo_registry(registration_no, name, district, status)
 select v.reg, v.name, 'Dhaka', 'active'
   from (values ('DEMO-0103', 'Shobar Jonno Relief Network'), ('DEMO-0104', 'Nodi Humanitarian Foundation')) v(reg, name)
@@ -692,7 +627,6 @@ select o.id, v.emp, v.mail, v.name, v.role::app_role
  where not exists (select 1 from staff_roster s where s.organization_id = v.org
                      and (upper(s.employee_id) = v.emp or lower(s.official_email) = v.mail));
 
--- ---------- 6. Role requests: checks, documents, two-person approval -----
 alter table role_requests add column if not exists email text;
 alter table role_requests add column if not exists source text not null default 'self';
 alter table role_requests add column if not exists requested_by uuid references profiles(id) on delete set null;
@@ -759,7 +693,6 @@ begin
   if (select count(*) from role_request_documents where request_id = new.request_id) >= 10 then
     raise exception 'VALIDATION: at most 10 documents per request' using errcode = '23514';
   end if;
-  -- the file must really exist in the private bucket (when Supabase Storage is present)
   if to_regclass('storage.objects') is not null then
     execute 'select exists (select 1 from storage.objects where bucket_id = $1 and name = $2)'
       into v_found using 'staff-documents', new.storage_path;
@@ -783,7 +716,6 @@ drop policy if exists rrd_delete on role_request_documents;
 create policy rrd_delete on role_request_documents for delete to authenticated
   using (user_id = auth.uid() and exists (select 1 from role_requests r where r.id = request_id and r.status = 'pending'));
 
--- Private bucket for ID cards / appointment letters (Supabase Storage only).
 do $$
 begin
   if to_regclass('storage.buckets') is null then
@@ -813,7 +745,6 @@ exception when insufficient_privilege then
   raise notice 'no permission on storage schema — create bucket "staff-documents" (private) and its policies in the dashboard';
 end $$;
 
--- Live verification of one request (roster may be uploaded after the request).
 create or replace function public.rm_request_checks(r role_requests, p_org uuid default null, p_reviewer uuid default null)
 returns jsonb
 language plpgsql stable security definer set search_path = public as $$
@@ -832,7 +763,6 @@ begin
   v_domain  := rm_email_domain(v_email);
   v_mail_ok := p.email_verified_at is not null;
 
-  -- e-mail domain
   if o.id is not null and cardinality(o.email_domains) > 0 and rm_domain_matches(v_domain, o.email_domains) then
     v_dstatus := 'official';
   elsif o.id is null and r.requested_role = 'city_officer' and exists (
@@ -849,7 +779,6 @@ begin
     v_email_ok := false; v_email_msg := 'NGO coordinators must use an organisation e-mail, not a public mail provider';
   end if;
 
-  -- staff roster
   v_emp := nullif(upper(btrim(coalesce(r.employee_id, p.employee_id))), '');
   if r.requested_role <> 'admin' then
     if v_emp is not null then
@@ -869,7 +798,6 @@ begin
     v_roster_by := rr.uploaded_by;
   end if;
 
-  -- NGOAB registration
   if r.requested_role = 'ngo_coordinator' then
     v_reg := nullif(upper(btrim(coalesce(r.registration_no, o.ngoab_registration_no))), '');
     if v_reg is null then v_ngo := 'missing';
@@ -887,7 +815,6 @@ begin
   end if;
   select count(*) into v_docs from role_request_documents d where d.request_id = r.id;
 
-  -- red flags: allowed only with two approvals and a written note
   if v_dstatus <> 'official' and r.requested_role <> 'admin' then flags := array_append(flags, 'email_domain'); end if;
   if v_roster not in ('verified','id_only','n/a') then flags := array_append(flags, 'roster'); end if;
   if v_ngo not in ('verified','n/a') then flags := array_append(flags, 'ngoab'); end if;
@@ -898,7 +825,6 @@ begin
     flags := array_append(flags, 'ngoab_uploaded_by_reviewer');
   end if;
 
-  -- hard blockers
   if r.requested_role <> 'admin' and v_org is null then blockers := array_append(blockers, 'organisation_missing'); end if;
   if o.id is not null and not (
        (r.requested_role = 'city_officer'    and o.type = 'city_authority') or
@@ -933,7 +859,6 @@ begin
 end $$;
 revoke execute on function public.rm_request_checks(role_requests, uuid, uuid) from anon, authenticated, public;
 
--- PostgREST computed column: select=*,verification  (admins only)
 create or replace function public.verification(r role_requests) returns jsonb
 language plpgsql stable security definer set search_path = public as $$
 begin
@@ -942,7 +867,6 @@ begin
 end $$;
 grant execute on function public.verification(role_requests) to authenticated;
 
--- ---------- 7. Sign-up trigger: official domain, BD phone, snapshot -----
 create or replace function public.handle_new_user() returns trigger
 language plpgsql security definer set search_path = public as $$
 declare
@@ -959,8 +883,8 @@ begin
     coalesce(nullif(left(trim(m->>'full_name'), 100), ''), split_part(new.email, '@', 1)),
     new.email,
     coalesce(case when new.phone_confirmed_at is not null then rm_normalize_bd_phone(new.phone) end,
-             rm_normalize_bd_phone(m->>'phone')),        -- non-BD numbers are dropped, never stored
-    'citizen',                                            -- always citizen; staff roles need admin approval
+             rm_normalize_bd_phone(m->>'phone')),
+    'citizen',
     v_ward,
     new.email_confirmed_at,
     case when new.phone_confirmed_at is not null and rm_normalize_bd_phone(new.phone) is not null then new.phone_confirmed_at end
@@ -976,7 +900,6 @@ begin
     select * into o from organizations where id = v_org;
     if o.id is null then v_org := null; end if;
 
-    -- official e-mail domain is enforced at sign-up: the account is not created at all
     v_dom := rm_email_domain(new.email);
     if s.require_official_email then
       if v_role = 'city_officer' and not (
@@ -1008,7 +931,7 @@ begin
         v_ward
       );
     exception when check_violation or unique_violation then
-      null;   -- malformed staff details must never block a citizen account (profile is kept)
+      null;
     end;
   end if;
   return new;
@@ -1018,7 +941,6 @@ drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created after insert on auth.users
   for each row execute function public.handle_new_user();
 
--- auth.users → profiles: e-mail, confirmed e-mail, OTP-verified phone
 create or replace function public.rm_sync_auth_user() returns trigger
 language plpgsql security definer set search_path = public as $$
 declare v_phone text := rm_normalize_bd_phone(new.phone);
@@ -1037,7 +959,6 @@ drop trigger if exists on_auth_user_updated on auth.users;
 create trigger on_auth_user_updated after update of email, email_confirmed_at, phone, phone_confirmed_at on auth.users
   for each row execute function public.rm_sync_auth_user();
 
--- ---------- 8. Review: two different admins for sensitive / flagged ------
 drop function if exists public.rm_review_role_request(uuid, boolean, uuid, text);
 create function public.rm_review_role_request(
   p_id uuid, p_approve boolean, p_org_id uuid default null, p_note text default null)
@@ -1059,7 +980,6 @@ begin
     raise exception 'FORBIDDEN: you cannot review your own access request' using errcode = '42501';
   end if;
 
-  -- any single admin may refuse (fail-safe)
   if not p_approve then
     if v_note is null or char_length(v_note) < 3 then
       raise exception 'VALIDATION: give the applicant a short reason' using errcode = '23514';
@@ -1077,7 +997,6 @@ begin
     raise exception 'CONFLICT: you proposed this change — a different admin must approve it' using errcode = '40001';
   end if;
 
-  -- the organisation is fixed by the first approver; later approvers confirm the same one
   v_org := coalesce(p_org_id, r.organization_id);
   if exists (select 1 from role_request_approvals where request_id = p_id)
      and r.organization_id is distinct from v_org then
@@ -1115,7 +1034,7 @@ begin
          is_active = true
    where id = r.user_id;
   perform set_config('rm.role_grant', 'off', true);
-  delete from staff_sessions where user_id = r.user_id;      -- the new role needs a fresh staff sign-in
+  delete from staff_sessions where user_id = r.user_id;
 
   update role_requests
      set status = 'approved', organization_id = v_org, required_approvals = v_required,
@@ -1125,8 +1044,6 @@ begin
 end $$;
 grant execute on function public.rm_review_role_request(uuid, boolean, uuid, text) to authenticated;
 
--- An admin who wants to grant / change staff access files a request that a
--- DIFFERENT admin must approve (the proposer counts as the first approval).
 create or replace function public.rm_admin_propose_role_change(
   p_user uuid, p_role app_role, p_org_id uuid default null, p_employee_id text default null, p_note text default null)
 returns jsonb
@@ -1163,7 +1080,6 @@ begin
 end $$;
 grant execute on function public.rm_admin_propose_role_change(uuid, app_role, uuid, text, text) to authenticated;
 
--- ---------- 9. Reports: service area, location ↔ ward, rate limit, flags --
 alter table incidents add column if not exists trust_flags text[] not null default '{}';
 alter table incidents add column if not exists reporter_country text;
 
@@ -1179,7 +1095,6 @@ declare
   v_pt geography; v_km double precision; v_ward_name text; v_nearest text; v_home_km double precision;
   v_country text; n_hour int; n_day int; v_flags text[] := '{}';
 begin
-  -- clients can never forge reporter, status, AI or trust fields
   if not rm_is_system() then
     new.reporter_id := auth.uid();
     new.status := 'reported';
@@ -1214,7 +1129,6 @@ begin
       if p.created_at > now() - interval '24 hours' then v_flags := array_append(v_flags, 'new_account'); end if;
     end if;
 
-    -- the pin must belong to the chosen ward (nearest ward centroid wins)
     v_pt := st_setsrid(st_makepoint(new.lng, new.lat), 4326)::geography;
     select st_distance(location, v_pt) / 1000.0, name into v_km, v_ward_name from wards where id = new.ward_id;
     select id into v_nearest from wards order by st_distance(location, v_pt) limit 1;
@@ -1238,7 +1152,6 @@ begin
     new.trust_flags := v_flags;
   end if;
 
-  -- Geospatial duplicate detection: same category within 150 m in the last 6 h
   select i.id into v_dup
   from incidents i
   where i.category = new.category
@@ -1278,7 +1191,6 @@ begin
     if (new.lat is distinct from old.lat or new.lng is distinct from old.lng) and not rm_in_dhaka(new.lat, new.lng) then
       raise exception 'VALIDATION: the location must be inside the Dhaka service area' using errcode = '23514';
     end if;
-    -- citizens may only edit text of their own report while it is still 'reported'
     if coalesce(rm_role()::text, 'citizen') = 'citizen' then
       if old.status <> 'reported'
          or new.status is distinct from old.status
@@ -1295,7 +1207,6 @@ begin
   return new;
 end $$;
 
--- community needs: BD contact phone, citizen phone check + daily limit
 create or replace function public.rm_need_before_insert() returns trigger
 language plpgsql security definer set search_path = public as $$
 declare v_dup uuid; s security_settings; v_n int;
@@ -1344,7 +1255,6 @@ begin
   return new;
 end $$;
 
--- realtime for the admin queue (approvals) — optional
 do $$ begin
   alter publication supabase_realtime add table role_request_approvals;
 exception when others then null; end $$;

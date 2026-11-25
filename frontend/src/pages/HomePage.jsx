@@ -29,8 +29,6 @@ const HIGHLIGHTS = [
 
 const fadeUp = { hidden: { opacity: 0, y: 24 }, show: { opacity: 1, y: 0 } }
 
-// Video-style showcase: slides cross-fade while slowly zooming/panning (Ken Burns).
-// Captions sit BELOW the frame, never on top of the picture.
 const SLIDES = [
   { img: '/images/photo-flooded-street.webp', caption: 'City-wide view: AI links rainfall, flooded wards, pumps and relief teams', pan: ['0%', '-3%'] },
   { img: '/images/photo-flooded-road.webp', caption: 'Live risk map: ward risk, drainage assets and crews on the move', pan: ['-2%', '2%'] },
@@ -40,7 +38,6 @@ const SLIDES = [
 const SLIDE_MS = 3000
 const FADE_S = 0.7
 
-// Slides advance continuously, one after another (no hover pause, no indicators).
 function Showcase({ reduce }) {
   const [i, setI] = useState(0)
   useEffect(() => {
@@ -73,9 +70,8 @@ function Showcase({ reduce }) {
   )
 }
 
-// Capsule role picker in the middle of the home page: pick a user type, then sign in / sign up as it.
 function RolePicker() {
-  const [role, setRole] = useState('citizen')
+  const [role, setRole] = useState('admin')
   const r = ROLE_BY_KEY[role]
   const Icon = r.icon
   return (
@@ -123,7 +119,6 @@ export default function HomePage() {
 
   return (
     <div className="h-full overflow-y-auto">
-      {/* ------------------------------------------------ top bar */}
       <header className="sticky top-0 z-20 border-b border-slate-200/70 bg-white/80 backdrop-blur-md">
         <div className="mx-auto flex h-16 max-w-6xl items-center gap-3 px-4 sm:px-6">
           <img src="/icon.svg" alt="" className="h-9 w-9 rounded-xl" />
@@ -144,7 +139,6 @@ export default function HomePage() {
       </header>
 
       <main>
-        {/* ------------------------------------------------ hero: text left, picture right (no text on the picture) */}
         <section className="mx-auto grid max-w-6xl items-center gap-10 px-4 py-12 sm:px-6 lg:grid-cols-2 lg:py-20">
           <motion.div initial="hidden" animate="show" transition={{ staggerChildren: 0.1 }}>
             <motion.p variants={fadeUp} className="inline-flex items-center gap-2 rounded-full bg-brand-50 px-3 py-1 text-xs font-semibold text-brand-700 ring-1 ring-inset ring-brand-200">
@@ -177,10 +171,8 @@ export default function HomePage() {
           <Showcase reduce={reduce} />
         </section>
 
-        {/* ------------------------------------------------ role capsule: pick a user type */}
         {!session && <RolePicker />}
 
-        {/* ------------------------------------------------ three modules: picture on top, text below */}
         <section className="border-t border-slate-200/70 bg-white/60">
           <div className="mx-auto max-w-6xl px-4 py-14 sm:px-6 lg:py-20">
             <h2 className="text-center text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">Three connected modules</h2>
@@ -204,7 +196,6 @@ export default function HomePage() {
           </div>
         </section>
 
-        {/* ------------------------------------------------ full-width photo band */}
         <section className="relative isolate overflow-hidden bg-ink-900">
           <img src="/images/photo-sandbag-street-bw.webp" alt="Responders building a sandbag barrier beside a flooded street" loading="lazy" decoding="async"
             className="absolute inset-0 -z-10 h-full w-full object-cover opacity-60" />
@@ -216,7 +207,6 @@ export default function HomePage() {
           </div>
         </section>
 
-        {/* ------------------------------------------------ closing call to action */}
         {!session && (
           <section className="mx-auto max-w-6xl px-4 py-14 text-center sm:px-6">
             <h2 className="text-2xl font-bold tracking-tight text-slate-900">Ready to report or respond?</h2>

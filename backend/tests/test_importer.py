@@ -1,4 +1,3 @@
-"""A08 — duplicate records, missing values, large input volumes."""
 import time
 
 import numpy as np
@@ -20,14 +19,12 @@ def test_duplicates_missing_and_invalid_rows():
     })
     clean, rep = clean_events(df, WARDS)
     assert rep["rows_read"] == 6
-    assert rep["rejected_invalid_key"] == 2            # unknown ward + unparsable date
-    assert rep["duplicates_in_file"] == 1               # case-insensitive ward duplicate
+    assert rep["rejected_invalid_key"] == 2
+    assert rep["duplicates_in_file"] == 1
     assert rep["clean_rows"] == 3
-    assert clean.isna().sum().sum() == 0                # everything imputed
-    # most complete duplicate row kept (it has rainfall 80)
+    assert clean.isna().sum().sum() == 0
     row = clean[(clean.ward_id == "DNCC-01") & (clean.event_date.astype(str) == "2020-07-01")].iloc[0]
     assert row.rainfall_mm == 80
-    # negative rainfall treated as missing and imputed, never stored negative
     assert (clean.rainfall_mm >= 0).all()
 
 
@@ -55,5 +52,5 @@ def test_large_volume_120k_rows_is_fast():
     elapsed = time.perf_counter() - t0
     assert elapsed < 15, f"too slow: {elapsed:.1f}s"
     assert rep["clean_rows"] == len(clean) == clean[["ward_id", "event_date"]].drop_duplicates().shape[0]
-    assert rep["clean_rows"] <= 2 * 3650                 # dedup collapses to ward x day
+    assert rep["clean_rows"] <= 2 * 3650
     assert clean.record_hash.is_unique

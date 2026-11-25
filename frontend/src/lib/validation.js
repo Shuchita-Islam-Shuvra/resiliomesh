@@ -1,4 +1,3 @@
-// Client-side validation (mirrors DB CHECK constraints so users get instant feedback).
 import { emailPolicyError, normalizeBdPhone } from './identity'
 
 export const DHAKA_BOUNDS = { minLat: 23.6, maxLat: 23.95, minLng: 90.25, maxLng: 90.55 }
@@ -54,7 +53,6 @@ const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/
 const NAME = /^[\p{L}][\p{L}\p{M} .'-]{1,99}$/u
 const EMPLOYEE_ID = /^[A-Za-z0-9/-]{3,30}$/
 
-/** Bangladeshi mobile in E.164 (+8801XXXXXXXXX); '' when empty; the raw input when it is not a BD mobile. */
 export const normalizePhone = (p = '') => normalizeBdPhone(p) || p.replace(/[\s-]/g, '')
 
 export function validateEmail(email) {
@@ -64,7 +62,6 @@ export function validateEmail(email) {
   return null
 }
 
-/** 0–4 strength score + label, used by the sign-up meter. */
 export function passwordStrength(pw = '') {
   if (!pw) return { score: 0, label: '' }
   let s = 0
@@ -89,12 +86,6 @@ export function validatePassword(pw, { email, staff } = {}) {
   return null
 }
 
-/**
- * Role-aware sign-up validation. Optional keys (confirm_password, accept_terms)
- * are only checked when present so older callers keep working.
- * @param ctx  { org, orgs } — chosen organisation and all public organisations,
- *             used for the official e-mail domain rule (also enforced by the DB)
- */
 export function validateRegister(v, role = 'citizen', ctx = {}) {
   const e = {}
   const staff = role !== 'citizen'
@@ -104,7 +95,7 @@ export function validateRegister(v, role = 'citizen', ctx = {}) {
 
   const em = validateEmail(v.email)
   if (em) e.email = em
-  else if (staff && ctx.orgs) {   // needs the organisation list (official domains) to judge
+  else if (staff && ctx.orgs) {
     const policy = emailPolicyError(v.email, role, ctx.org || null, ctx.orgs || [])
     if (policy) e.email = policy
   }
@@ -113,7 +104,6 @@ export function validateRegister(v, role = 'citizen', ctx = {}) {
   if (pw) e.password = pw
   if ('confirm_password' in v && v.confirm_password !== v.password) e.confirm_password = 'Passwords do not match'
 
-  // a Bangladeshi mobile is required for everyone: it is verified by SMS code (OTP)
   if ('phone' in v || staff) {
     if (!(v.phone || '').trim()) e.phone = staff ? 'Mobile number is required for staff accounts' : 'Mobile number is required'
     else if (!normalizeBdPhone(v.phone)) e.phone = BD_PHONE_MSG
@@ -144,7 +134,6 @@ export function validateRegister(v, role = 'citizen', ctx = {}) {
   return e
 }
 
-// label of the extra sign-in identifier per role (null = email + password only)
 export const SIGNIN_ID_LABEL = { city_officer: 'Employee ID', field_worker: 'Staff ID', admin: 'Admin ID' }
 
 export function validateSignIn({ email, password, employee_id, organization_id }, role = 'citizen') {

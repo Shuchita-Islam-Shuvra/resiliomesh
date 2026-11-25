@@ -1,10 +1,3 @@
-"""End-to-end business flow + security against a REAL database (A03, A05, A07, M04).
-
-Simulates PostgREST exactly: `set local role authenticated` + JWT claims, so every
-statement is subject to the same RLS policies and RPC checks the browser hits.
-
-    TEST_DATABASE_URL=postgresql://... pytest tests/test_db_flow.py -v
-"""
 import json
 import os
 import threading
@@ -39,15 +32,13 @@ def users():
                 uid = new_auth_user(c, key)
             except psycopg.Error as e:
                 pytest.skip(f"cannot create auth users in this database: {e}")
-            # NGO coordinators get a home area (014): Shobar's two in Dhaka South, Nodi's in Dhaka North
             home = {"ngo": "DSCC-10", "ngo_b": "DSCC-10", "ngo_north": "DNCC-02"}.get(key)
             c.execute("update profiles set role=%s, organization_id=%s, ward_id=coalesce(%s, ward_id) where id=%s",
                       (role, org, home, uid))
-            open_session(c, uid)                       # signed in ...
+            open_session(c, uid)
             if role != "citizen":
-                verify_staff_session(c, uid)           # ... and passed the server-side staff-ID step
+                verify_staff_session(c, uid)
             ids[key] = uid
-    # make the backend use this database too (workflow engine via PgStore)
     os.environ["DATABASE_URL"] = DSN
     from app.core import config, db
     config.get_settings.cache_clear()
@@ -67,10 +58,10 @@ def ensure_staff_session(uid):
 
 
 def new_incident(uid, **kw):
-    lat, lng = random_dhaka_point("DSCC")              # spread out: avoid geo-duplicate; in the officer's area
+    lat, lng = random_dhaka_point("DSCC")
     lat, lng = kw.get("lat", lat), kw.get("lng", lng)
     with raw() as c:
-        ward = nearest_ward(c, lat, lng)               # the pin must belong to the chosen ward
+        ward = nearest_ward(c, lat, lng)
     with as_user(uid) as c:
         return c.execute("""insert into incidents(reporter_id, ward_id, category, title, description, severity_reported,
                              water_depth_cm, people_affected, lat, lng, status, risk_score)
@@ -81,7 +72,6 @@ def new_incident(uid, **kw):
                           "st": kw.get("status", "reported"), "rs": kw.get("risk_score")}).fetchone()
 
 
-# ------------------------------------------------------------------ A03 security
 def test_client_cannot_forge_status_reporter_or_risk(users):
     inc = new_incident(users["citizen"], reporter=users["officer"], status="approved", risk_score=99)
     assert inc["status"] == "reported"
@@ -108,7 +98,7 @@ def test_citizen_cannot_modify_another_users_record(users):
     with as_user(users["citizen"]) as c:
         updated = c.execute("update incidents set description='hacked by citizen 1' where id=%s returning id",
                             (other["id"],)).fetchall()
-    assert updated == []                         # RLS hides the row: zero rows affected
+    assert updated == []
 
 
 def test_ngo_cannot_touch_other_orgs_stock(users):
@@ -125,13 +115,11 @@ def test_audit_trail_records_actor(users):
     assert str(row["actor_id"]) == users["citizen"] and row["actor_role"] == "citizen" and row["action"] == "INSERT"
 
 
-# ------------------------------------------------------------------ M04 / A01
 def test_officer_transition_with_optimistic_lock(users):
     inc = new_incident(users["citizen"])
     with as_user(users["officer"]) as c:
         r = c.execute("select transition_incident(%s,'verified',%s,null,null) r", (inc["id"], inc["version"])).fetchone()["r"]
     assert r["ok"] is True
-    # second officer still holds the old version -> conflict, not overwrite
     with as_user(users["officer"]) as c:
         r2 = c.execute("select transition_incident(%s,'rejected',%s,'stale',null) r", (inc["id"], inc["version"])).fetchone()["r"]
     assert r2["conflict"] is True and r2["current"]["status"] == "verified"
@@ -142,7 +130,7 @@ def test_role_rules_on_transitions(users):
     with pytest.raises(psycopg.Error, match="FORBIDDEN"):
         with as_user(users["citizen"]) as c:
             c.execute("select transition_incident(%s,'verified',%s,null,null)", (inc["id"], inc["version"]))
-    with pytest.raises(psycopg.Error, match="INVALID_STATE"):   # cannot assess without AI score
+    with pytest.raises(psycopg.Error, match="INVALID_STATE"):
         with as_user(users["officer"]) as c:
             v = c.execute("select transition_incident(%s,'verified',%s,null,null) r", (inc["id"], inc["version"])).fetchone()["r"]
             c.execute("select transition_incident(%s,'assessed',%s,null,null)", (inc["id"], v["incident"]["version"]))
@@ -151,12 +139,11 @@ def test_role_rules_on_transitions(users):
 def test_geospatial_duplicate_detection(users):
     lat, lng = random_dhaka_point()
     a = new_incident(users["citizen"], lat=lat, lng=lng)
-    b = new_incident(users["citizen2"], lat=lat + 0.0001, lng=lng + 0.0001)      # ~15 m away
+    b = new_incident(users["citizen2"], lat=lat + 0.0001, lng=lng + 0.0001)
     assert a["status"] == "reported"
     assert b["status"] == "duplicate" and b["duplicate_of"] == a["id"]
 
 
-# ------------------------------------------------------------------ A05 NGO race
 def test_two_coordinators_race_for_last_relief_kits(users):
     with raw() as c:
         rid = c.execute("""insert into resources(organization_id, resource_type, name, quantity_total, quantity_available, lat, lng)
@@ -182,10 +169,9 @@ def test_two_coordinators_race_for_last_relief_kits(users):
     with raw() as c:
         assert c.execute("select quantity_available q from resources where id=%s", (rid,)).fetchone()["q"] == 0
         statuses = sorted(r["status"] for r in c.execute("select status::text from community_needs where id = any(%s)", (needs,)).fetchall())
-    assert statuses == ["fulfilled", "open"]       # the loser's need stays open, never half-written
+    assert statuses == ["fulfilled", "open"]
 
 
-# ------------------------------------------------------------------ NGO aid lifecycle (migration 013)
 def test_ngo_allocation_lifecycle_cancel_returns_stock_and_deliver_keeps_it(users):
     with raw() as c:
         rid = c.execute("""insert into resources(organization_id, resource_type, name, quantity_total, quantity_available, lat, lng)
@@ -194,12 +180,10 @@ def test_ngo_allocation_lifecycle_cancel_returns_stock_and_deliver_keeps_it(user
                             values ('DSCC-10','relief_kit',6,6,'x',%s) returning id""", (str(uuid.uuid4()),)).fetchone()["id"]
     with as_user(users["ngo"]) as c:
         a1 = c.execute("select allocate_to_need(%s,%s,4,%s) r", (need, rid, str(uuid.uuid4()))).fetchone()["r"]["allocation"]["id"]
-        # cannot cancel the need while stock is reserved against it
         with pytest.raises(psycopg.Error, match="INVALID_STATE"):
             c.execute("select cancel_need(%s,null)", (need,))
     with as_user(users["ngo"]) as c:
         assert c.execute("select ngo_update_allocation(%s,'cancel') r", (a1,)).fetchone()["r"]["ok"]
-        # second cancel is an idempotent replay, stock is returned exactly once
         assert c.execute("select ngo_update_allocation(%s,'cancel') r", (a1,)).fetchone()["r"]["replayed"]
     with raw() as c:
         assert c.execute("select quantity_available q from resources where id=%s", (rid,)).fetchone()["q"] == 10
@@ -209,7 +193,7 @@ def test_ngo_allocation_lifecycle_cancel_returns_stock_and_deliver_keeps_it(user
         a2 = c.execute("select allocate_to_need(%s,%s,6,%s) r", (need, rid, str(uuid.uuid4()))).fetchone()["r"]["allocation"]["id"]
         c.execute("select ngo_update_allocation(%s,'dispatch')", (a2,))
         c.execute("select ngo_update_allocation(%s,'deliver')", (a2,))
-        with pytest.raises(psycopg.Error, match="INVALID_STATE"):          # a delivered allocation cannot be cancelled
+        with pytest.raises(psycopg.Error, match="INVALID_STATE"):
             c.execute("select ngo_update_allocation(%s,'cancel')", (a2,))
     with raw() as c:
         assert c.execute("select quantity_available q from resources where id=%s", (rid,)).fetchone()["q"] == 4
@@ -224,7 +208,7 @@ def test_ngo_cannot_manage_another_ngos_allocation_or_cancel_its_need(users):
                             values ('DSCC-10','relief_kit',2,2,'x',%s) returning id""", (str(uuid.uuid4()),)).fetchone()["id"]
         alloc = c.execute("select (rm_reserve_resource(%s,2,%s,null,%s,null,null)).id id", (rid, str(uuid.uuid4()), need)).fetchone()["id"]
         c.execute("update community_needs set organization_id=%s where id=%s", (NODI, need))
-    with as_user(users["ngo"]) as c:                                       # Shobar coordinator vs Nodi's records
+    with as_user(users["ngo"]) as c:
         with pytest.raises(psycopg.Error, match="FORBIDDEN"):
             c.execute("select ngo_update_allocation(%s,'cancel')", (alloc,))
     with as_user(users["ngo"]) as c:
@@ -235,7 +219,6 @@ def test_ngo_cannot_manage_another_ngos_allocation_or_cancel_its_need(users):
             c.execute("select ngo_update_allocation(%s,'deliver')", (alloc,))
 
 
-# ------------------------------------------------------------------ North / South coordinators + backup (migration 014)
 def _need_and_stock(ward, org):
     with raw() as c:
         rid = c.execute("""insert into resources(organization_id, resource_type, name, quantity_total, quantity_available, lat, lng)
@@ -248,29 +231,29 @@ def _need_and_stock(ward, org):
 def test_coordinator_handles_own_area_and_helps_other_area_only_on_request(users):
     with raw() as c:
         c.execute("delete from ngo_area_backup")
-    need, _ = _need_and_stock("DNCC-02", NODI)              # a Dhaka North need
-    _, south_stock = _need_and_stock("DSCC-10", SHOBAR)     # Shobar's stock, used by the South coordinator
-    with as_user(users["ngo"]) as c:                        # South coordinator, no backup requested yet
+    need, _ = _need_and_stock("DNCC-02", NODI)
+    _, south_stock = _need_and_stock("DSCC-10", SHOBAR)
+    with as_user(users["ngo"]) as c:
         assert c.execute("select rm_ngo_area() a").fetchone()["a"] == "DSCC"
         assert c.execute("select rm_ngo_access(%s) a", (need,)).fetchone()["a"] is None
         with pytest.raises(psycopg.Error, match="FORBIDDEN"):
             c.execute("select allocate_to_need(%s,%s,2,%s)", (need, south_stock, str(uuid.uuid4())))
-    with as_user(users["ngo"]) as c:                        # ... and cannot ask for backup on North's behalf
+    with as_user(users["ngo"]) as c:
         with pytest.raises(psycopg.Error, match="FORBIDDEN"):
             c.execute("select request_ngo_backup(%s,true,null)", (need,))
 
-    with as_user(users["ngo_north"]) as c:                  # North coordinator owns it and asks for help
+    with as_user(users["ngo_north"]) as c:
         assert c.execute("select rm_ngo_access(%s) a", (need,)).fetchone()["a"] == "home"
         c.execute("select request_ngo_backup(%s,true,'boats stuck, need kits fast')", (need,))
-    with as_user(users["ngo"]) as c:                        # South can now help, from Shobar's own stock
+    with as_user(users["ngo"]) as c:
         r = c.execute("select allocate_to_need(%s,%s,2,%s) r", (need, south_stock, str(uuid.uuid4()))).fetchone()["r"]
         assert r["ok"] and r["access"] == "backup"
-    with as_user(users["ngo"]) as c:                        # a helper allocates but does not close the need
+    with as_user(users["ngo"]) as c:
         with pytest.raises(psycopg.Error, match="FORBIDDEN"):
             c.execute("select cancel_need(%s,null)", (need,))
 
     need2, _ = _need_and_stock("DNCC-02", NODI)
-    with as_user(users["ngo_north"]) as c:                  # whole area asks for backup
+    with as_user(users["ngo_north"]) as c:
         c.execute("select set_ngo_area_backup(true,'North overwhelmed')")
     with as_user(users["ngo"]) as c:
         assert c.execute("select rm_ngo_access(%s) a", (need2,)).fetchone()["a"] == "backup"
@@ -289,12 +272,11 @@ def test_vice_versa_north_helps_south_and_area_change_needs_admin(users):
         c.execute("select request_ngo_backup(%s,true,null)", (need,))
     with as_user(users["ngo_north"]) as c:
         assert c.execute("select allocate_to_need(%s,%s,1,%s) r", (need, north_stock, str(uuid.uuid4()))).fetchone()["r"]["ok"]
-    with as_user(users["ngo"]) as c:                        # a coordinator cannot move themselves to the other area
+    with as_user(users["ngo"]) as c:
         with pytest.raises(psycopg.Error, match="FORBIDDEN"):
             c.execute("update profiles set ward_id='DNCC-02' where id=%s", (users["ngo"],))
 
 
-# ------------------------------------------------------------------ A07 workflow on real DB
 def _assessed_incident_with_plan(users, pump_id, qty=2):
     inc = new_incident(users["citizen"])
     with raw() as c:
@@ -313,7 +295,7 @@ def _assessed_incident_with_plan(users, pump_id, qty=2):
 def _drain_queue():
     from app.workflow.engine import WorkflowEngine
     from app.workflow.pg_store import PgStore, claim_run
-    with raw() as c:   # make retries immediately runnable for the test
+    with raw() as c:
         c.execute("update workflow_runs set next_run_at = now() where status = 'retrying'")
     results = []
     eng = WorkflowEngine(PgStore(), backoff_base_s=0)
@@ -335,7 +317,7 @@ def test_full_dispatch_then_field_completion_returns_equipment(users, pump):
     with as_user(users["officer"]) as c:
         r = c.execute("select approve_plan(%s,%s,null) r", (plan["id"], plan["version"])).fetchone()["r"]
         again = c.execute("select approve_plan(%s,%s,null) r", (plan["id"], plan["version"])).fetchone()["r"]
-    assert r["ok"] and again["replayed"] and again["run_id"] == r["run_id"]     # double-click safe
+    assert r["ok"] and again["replayed"] and again["run_id"] == r["run_id"]
 
     res = _drain_queue()
     assert {"status": "succeeded"} in res
@@ -345,7 +327,6 @@ def test_full_dispatch_then_field_completion_returns_equipment(users, pump):
         tasks = c.execute("select id, version, status::text, assigned_to from tasks where incident_id=%s", (inc["id"],)).fetchall()
     assert tasks and all(t["status"] == "assigned" for t in tasks)
 
-    # field worker completes every task -> incident resolved, pumps back in stock
     for t in tasks:
         ensure_staff_session(t["assigned_to"])
         with as_user(t["assigned_to"]) as c:
@@ -371,15 +352,76 @@ def test_field_worker_cannot_update_someone_elses_task(users, pump):
             c.execute("select update_task_status(%s,'completed',%s,null)", (t["id"], t["version"]))
 
 
+def test_officer_sets_crew_and_worker_declines_with_handover(users, pump):
+    inc, plan = _assessed_incident_with_plan(users, pump, qty=1)
+    with as_user(users["officer"]) as c:
+        c.execute("select approve_plan(%s,%s,null)", (plan["id"], plan["version"]))
+    _drain_queue()
+    with raw() as c:
+        t = c.execute("select id, assigned_to from tasks where incident_id=%s limit 1", (inc["id"],)).fetchone()
+        crew = c.execute("select worker_id, is_lead from task_assignees where task_id=%s", (t["id"],)).fetchall()
+    assert crew and sum(r["is_lead"] for r in crew) == 1
+    assert next(r["worker_id"] for r in crew if r["is_lead"]) == t["assigned_to"]
+
+    with pytest.raises(psycopg.Error, match="FORBIDDEN"):
+        with as_user(users["citizen"]) as c:
+            c.execute("select assign_task_crew(%s, array[%s]::uuid[], null)", (t["id"], users["field"]))
+    with as_user(users["officer"]) as c:
+        out = c.execute("select assign_task_crew(%s, array[%s]::uuid[], null) r", (t["id"], users["field"])).fetchone()["r"]
+    assert out["ok"] and str(out["task"]["assigned_to"]) == str(users["field"])
+
+    with pytest.raises(psycopg.Error, match="VALIDATION"):
+        with as_user(users["field"]) as c:
+            c.execute("select decline_task(%s, '')", (t["id"],))
+    with as_user(users["field"]) as c:
+        r = c.execute("select decline_task(%s, 'Sick today, cannot go') r", (t["id"],)).fetchone()["r"]
+    with raw() as c:
+        after = c.execute("select status::text s, assigned_to from tasks where id=%s", (t["id"],)).fetchone()
+        gone = c.execute("select 1 from task_assignees where task_id=%s and worker_id=%s", (t["id"], users["field"])).fetchone()
+        logged = c.execute("select 1 from task_declines where task_id=%s and worker_id=%s", (t["id"], users["field"])).fetchone()
+    assert gone is None and logged is not None
+    assert (after["s"] == "pending") == (r["replacement"] is None)
+
+
+def test_worker_reports_problem_after_accepting_and_officer_restaffs(users, pump):
+    inc, plan = _assessed_incident_with_plan(users, pump, qty=1)
+    with as_user(users["officer"]) as c:
+        c.execute("select approve_plan(%s,%s,null)", (plan["id"], plan["version"]))
+    _drain_queue()
+    with raw() as c:
+        t = c.execute("select id from tasks where incident_id=%s limit 1", (inc["id"],)).fetchone()
+    with as_user(users["officer"]) as c:
+        v = c.execute("select assign_task_crew(%s, array[%s]::uuid[], null) r", (t["id"], users["field"])).fetchone()["r"]["task"]["version"]
+
+    ensure_staff_session(users["field"])
+    with as_user(users["field"]) as c:
+        v = c.execute("select update_task_status(%s,'accepted',%s) r", (t["id"], v)).fetchone()["r"]["task"]["version"]
+    with pytest.raises(psycopg.Error, match="VALIDATION"):
+        with as_user(users["field"]) as c:
+            c.execute("select update_task_status(%s,'failed',%s,'  ') r", (t["id"], v))
+    with as_user(users["field"]) as c:
+        out = c.execute("select update_task_status(%s,'failed',%s,'Road blocked by a fallen tree',23.73,90.41) r",
+                        (t["id"], v)).fetchone()["r"]
+    assert out["ok"] and out["task"]["status"] == "failed"
+    assert out["task"]["finished_lat"] == 23.73 and str(out["task"]["finished_by"]) == str(users["field"])
+    with pytest.raises(psycopg.Error, match="FORBIDDEN"):
+        with as_user(users["field"]) as c:
+            c.execute("select update_task_status(%s,'cancelled',%s)", (t["id"], out["task"]["version"]))
+
+    with as_user(users["officer"]) as c:
+        again = c.execute("select assign_task_crew(%s, array[%s]::uuid[], null) r", (t["id"], users["field"])).fetchone()["r"]
+    assert again["task"]["status"] == "assigned"
+
+
 def test_intermediate_step_failure_compensates_everything(users, pump):
     inc, plan = _assessed_incident_with_plan(users, pump)
-    with pytest.raises(psycopg.Error, match="FORBIDDEN"):          # only admins may inject faults
+    with pytest.raises(psycopg.Error, match="FORBIDDEN"):
         with as_user(users["officer"]) as c:
             c.execute("select approve_plan(%s,%s,'create_tasks')", (plan["id"], plan["version"]))
     with as_user(users["admin"]) as c:
         run_id = c.execute("select approve_plan(%s,%s,'create_tasks') r", (plan["id"], plan["version"])).fetchone()["r"]["run_id"]
 
-    for _ in range(3):        # attempt 1, 2 -> retrying ; attempt 3 -> compensated
+    for _ in range(3):
         _drain_queue()
     with raw() as c:
         run = c.execute("select status::text s, attempts from workflow_runs where id=%s", (run_id,)).fetchone()
@@ -393,7 +435,6 @@ def test_intermediate_step_failure_compensates_everything(users, pump):
     assert pump_q == 4 and inc_s == "assessed" and plan_s == "failed"
     assert allocs and all(a["status"] == "released" for a in allocs)
 
-    # recovery: admin retries -> succeeds without double reservation
     with as_user(users["admin"]) as c:
         c.execute("select retry_workflow_run(%s)", (run_id,))
     _drain_queue()
@@ -411,17 +452,16 @@ def test_analytics_is_staff_only(users):
             c.execute("select analytics_dashboard(30, null)")
 
 
-# ------------------------------------------------------------------ officer vs NGO duties (migration 015)
 def test_ngo_coordinator_cannot_approve_or_reject_pump_and_crew_plans(users, pump):
     inc, plan = _assessed_incident_with_plan(users, pump)
-    for ngo in ("ngo", "ngo_north"):                         # neither area's coordinator
+    for ngo in ("ngo", "ngo_north"):
         with as_user(users[ngo]) as c:
             with pytest.raises(psycopg.Error, match="FORBIDDEN"):
                 c.execute("select approve_plan(%s,%s,null)", (plan["id"], plan["version"]))
         with as_user(users[ngo]) as c:
             with pytest.raises(psycopg.Error, match="FORBIDDEN"):
                 c.execute("select reject_plan(%s,'not ours')", (plan["id"],))
-    with as_user(users["ngo"]) as c:                         # ... but can still read the report
+    with as_user(users["ngo"]) as c:
         assert c.execute("select count(*) n from incidents where id=%s", (inc["id"],)).fetchone()["n"] == 1
     with raw() as c:
         assert c.execute("select status from allocation_plans where id=%s", (plan["id"],)).fetchone()["status"] == "pending_approval"
@@ -435,26 +475,25 @@ def test_ngo_relief_is_not_auto_delivered_when_the_report_is_resolved(users):
         ward = c.execute("select ward_id from incidents where id=%s", (inc["id"],)).fetchone()["ward_id"]
         need = c.execute("""insert into community_needs(ward_id, incident_id, need_type, quantity, households, dedup_key, contact_name)
                             values (%s,%s,'relief_kit',2,2,'x',%s) returning id""", (ward, inc["id"], str(uuid.uuid4()))).fetchone()["id"]
-        c.execute("update community_needs set backup_requested_at = now() where id=%s", (need,))   # whichever area it is in
+        c.execute("update community_needs set backup_requested_at = now() where id=%s", (need,))
     with as_user(users["ngo"]) as c:
         a = c.execute("select allocate_to_need(%s,%s,2,%s) r", (need, rid, str(uuid.uuid4()))).fetchone()["r"]["allocation"]
-    assert a["need_id"] == str(need) and a["incident_id"] is None      # tied to the need, not the officer's report
+    assert a["need_id"] == str(need) and a["incident_id"] is None
 
 
-# ------------------------------------------------------------------ who sees which stock (migration 016)
 def test_ngo_sees_only_own_stock_and_cannot_register_pumps(users):
     with raw() as c:
         nodi = c.execute("""insert into resources(organization_id, resource_type, name, quantity_total, quantity_available, lat, lng)
                             values (%s,'relief_kit',%s,5,5,23.74,90.37) returning id""", (NODI, f"nodi only {uuid.uuid4()}")).fetchone()["id"]
         pump = c.execute("""insert into resources(organization_id, resource_type, name, quantity_total, quantity_available, lat, lng)
                             values (%s,'pump',%s,2,2,23.74,90.37) returning id""", (SOUTH, f"south pump {uuid.uuid4()}")).fetchone()["id"]
-    with as_user(users["ngo"]) as c:                          # Shobar coordinator
+    with as_user(users["ngo"]) as c:
         orgs = {r["organization_id"] for r in c.execute("select organization_id::text from resources").fetchall()}
         assert orgs <= {SHOBAR}
         assert c.execute("select count(*) n from resources where id = any(%s)", ([nodi, pump],)).fetchone()["n"] == 0
-        with pytest.raises(psycopg.Error):                    # pumps / crews are authority equipment
+        with pytest.raises(psycopg.Error):
             c.execute("""insert into resources(organization_id, resource_type, name, quantity_total, quantity_available, lat, lng)
                          values (%s,'pump','our pump',1,1,23.74,90.37)""", (SHOBAR,))
-    with as_user(users["officer"]) as c:                      # Dhaka South officer: authority stock, not NGO stock
+    with as_user(users["officer"]) as c:
         assert c.execute("select count(*) n from resources where id=%s", (pump,)).fetchone()["n"] == 1
         assert c.execute("select count(*) n from resources where id=%s", (nodi,)).fetchone()["n"] == 0

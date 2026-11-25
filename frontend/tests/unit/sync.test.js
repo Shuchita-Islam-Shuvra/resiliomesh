@@ -1,4 +1,3 @@
-// A04 — outbox replay against a fake server: idempotency, conflicts, offline interruption
 import { beforeEach, describe, expect, it } from 'vitest'
 import * as store from '../../src/offline/db'
 import { flushOutbox } from '../../src/offline/sync'
@@ -23,7 +22,7 @@ function fakeServer(initialTasks) {
       return {
         upsert: async (payload) => {
           if (offline) return { error: new TypeError('Failed to fetch') }
-          if (!incidents.has(payload.client_id)) incidents.set(payload.client_id, payload)   // ON CONFLICT DO NOTHING
+          if (!incidents.has(payload.client_id)) incidents.set(payload.client_id, payload)
           return { error: null }
         },
       }
@@ -85,7 +84,7 @@ describe('flushOutbox', () => {
     const payload = { client_id: 'c-1', title: 'Water at Mugda' }
     await store.enqueue({ op_id: 'c-1', type: 'incident_report', payload })
     await flushOutbox(s)
-    await store.enqueue({ op_id: 'c-1', type: 'incident_report', payload })   // app crashed before removing op
+    await store.enqueue({ op_id: 'c-1', type: 'incident_report', payload })
     await flushOutbox(s)
     expect(s.incidents.size).toBe(1)
   })

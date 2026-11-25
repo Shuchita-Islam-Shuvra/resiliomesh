@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { AlertTriangle, ArrowRight, Boxes, CheckCircle2, ClipboardList, Clock, Droplets, HandHeart, Home, Package, Plus, ShieldCheck, Smartphone, Users, Workflow } from 'lucide-react'
+import { AlarmClock, AlertTriangle, ArrowRight, Boxes, CheckCircle2, ClipboardList, Clock, Crown, Droplets, HandHeart, HardHat, Home, MapPin, Package, Plus, Power, ShieldCheck, Smartphone, UserCog, Users, Workflow } from 'lucide-react'
 import { motion } from 'framer-motion'
 import { Alert, Button, Card, EmptyState, PageHeader, RiskBadge, Spinner, StatCard, StatusBadge } from '../components/ui'
 import { useAuth } from '../context/AuthContext'
 import { useDebouncedCallback, useRealtime } from '../hooks/useRealtime'
 import { supabase } from '../lib/supabase'
-import { CATEGORY_LABEL, RESOURCE_LABEL, fmtNum, timeAgo } from '../lib/format'
+import { CATEGORY_LABEL, RESOURCE_LABEL, fmtDateTime, fmtNum, timeAgo } from '../lib/format'
 import { errorMessage } from '../lib/errors'
 import { areaLabel } from '../lib/areas'
+import { ATTENTION, attentionQueue, isOverdue, sortTasks, staffing } from '../lib/fieldCrew'
 
 export default function DashboardPage() {
   const { profile } = useAuth()
@@ -28,33 +29,36 @@ function StaffDashboard() {
   const { area } = useAuth()
   const [a, setA] = useState(null)
   const [wards, setWards] = useState([])
-  const [queues, setQueues] = useState({ reported: [], verified: [], plans: [] })
+  const [queues, setQueues] = useState({ reported: [], verified: [], plans: [], tasks: [] })
   const [err, setErr] = useState('')
 
   const load = useCallback(async () => {
-    const [an, wr, rep, ver, pl] = await Promise.all([
+    const [an, wr, rep, ver, pl, tk] = await Promise.all([
       supabase.rpc('analytics_dashboard', { p_days: 7 }),
       supabase.rpc('ward_risk_summary'),
       supabase.from('incidents').select('id,reference_code,title,category,ward_id,created_at,severity_reported').eq('status', 'reported').order('created_at').limit(6),
       supabase.from('incidents').select('id,reference_code,title,category,ward_id,created_at').eq('status', 'verified').order('created_at').limit(6),
       supabase.from('allocation_plans').select('id,incident_ids,feasible,relaxed,created_at').eq('status', 'pending_approval').order('created_at', { ascending: false }).limit(5),
+      supabase.from('tasks').select('id,title,status,due_at,crew_size,assigned_to,updated_at,incident_id,incidents(reference_code,title,wards(name)),crew:task_assignees(worker_id),declines:task_declines(id)')
+        .not('status', 'in', '(completed,cancelled)').order('due_at', { ascending: true, nullsFirst: false }).limit(200),
     ])
-    const e = an.error || wr.error || rep.error || ver.error
+    const e = an.error || wr.error || rep.error || ver.error || tk.error
     if (e) setErr(errorMessage(e))
     setA(an.data); setWards(wr.data || [])
-    setQueues({ reported: rep.data || [], verified: ver.data || [], plans: pl.data || [] })
+    setQueues({ reported: rep.data || [], verified: ver.data || [], plans: pl.data || [], tasks: tk.data || [] })
   }, [])
   useEffect(() => { load() }, [load])
   const refresh = useDebouncedCallback(load, 800)
-  useRealtime(['incidents', 'allocation_plans', 'resources', 'wards'], refresh)
+  useRealtime(['incidents', 'allocation_plans', 'resources', 'wards', 'tasks', 'task_assignees'], refresh)
 
   if (!a && !err) return <Spinner />
   const t = a?.totals || {}
+  const attention = attentionQueue(queues.tasks)
   return (
     <>
       <Hero icon={ShieldCheck} eyebrow={area ? `Drainage command center · ${areaLabel(area)}` : 'Drainage command center'} title={area ? `${areaLabel(area)} operations overview` : 'Operations overview'} subtitle={<Greeting />}
         actions={<Link to="/incidents/new"><Button className="!bg-white !from-white !to-white !text-brand-800 hover:!bg-brand-50"><Plus className="h-4 w-4" />New report</Button></Link>}
-        stats={[['Awaiting verification', queues.reported.length], ['Awaiting AI assessment', queues.verified.length], ['Plans to approve', queues.plans.length]]} />
+        stats={[['Awaiting verification', queues.reported.length], ['Awaiting AI assessment', queues.verified.length], ['Plans to approve', queues.plans.length], ['Field tasks need attention', attention.length]]} />
       {err && <Alert tone="error" className="mb-4">{err}</Alert>}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatCard index={0} label="Active incidents" value={t.active ?? 0} hint="last 7 days" icon={Droplets} />
@@ -62,6 +66,8 @@ function StaffDashboard() {
         <StatCard index={2} label="People affected" value={t.people_affected ?? 0} hint="excl. duplicates" icon={Users} tone="amber" />
         <StatCard index={3} label="Avg. resolution" value={t.avg_resolution_hours ?? '—'} decimals={1} suffix=" h" hint={`P90 ${t.p90_resolution_hours ?? '—'} h`} icon={Clock} tone="green" />
       </div>
+
+      <CrewAttention items={attention} openTasks={queues.tasks.length} />
 
       <div className="mt-5 grid gap-5 xl:grid-cols-3">
         <Card title="Highest-risk wards" subtitle="Live AI ward risk (weather + drainage + history)" className="xl:col-span-2" bodyClass="p-0">
@@ -113,6 +119,43 @@ function StaffDashboard() {
         </Card>
       </div>
     </>
+  )
+}
+
+const ATTN_TONE = { red: 'bg-red-50 text-red-700 ring-red-200', amber: 'bg-amber-50 text-amber-800 ring-amber-200', slate: 'bg-slate-100 text-slate-600 ring-slate-200' }
+function CrewAttention({ items, openTasks }) {
+  return (
+    <Card className="mt-5" title="Field crews need attention" subtitle={`${openTasks} open field task${openTasks === 1 ? '' : 's'} in your area · updates live`}
+      actions={<Link className="text-xs font-medium text-brand-700 hover:underline" to="/workflows">All tasks</Link>} bodyClass="p-0">
+      {items.length === 0 ? (
+        <p className="flex items-center gap-2 px-5 py-4 text-sm text-slate-500"><CheckCircle2 className="h-4 w-4 text-emerald-600" aria-hidden />Every open field task has a full crew and is on time.</p>
+      ) : (
+        <ul className="divide-y divide-slate-100">
+          {items.slice(0, 8).map(({ task, reasons }) => {
+            const { have, need } = staffing(task)
+            return (
+              <li key={task.id}>
+                <Link to={`/incidents/${task.incident_id}`} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3 hover:bg-slate-50">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium text-slate-800">{task.title}</p>
+                    <p className="truncate text-xs text-slate-500">{task.incidents?.reference_code} · {task.incidents?.wards?.name} · crew {have} of {need}{task.due_at ? ` · due ${fmtDateTime(task.due_at)}` : ''}</p>
+                  </div>
+                  <span className="flex flex-wrap gap-1">
+                    {reasons.map((r) => (
+                      <span key={r} title={ATTENTION[r].hint} className={`rounded px-1.5 py-0.5 text-[11px] font-medium ring-1 ring-inset ${ATTN_TONE[ATTENTION[r].tone]}`}>
+                        {ATTENTION[r].label}{r === 'declined' && task.declines.length > 1 ? ` ×${task.declines.length}` : ''}
+                      </span>
+                    ))}
+                  </span>
+                  <span className="inline-flex items-center gap-1 text-xs font-medium text-brand-700"><UserCog className="h-3.5 w-3.5" aria-hidden />{have === 0 ? 'Assign crew' : 'Open'}</span>
+                </Link>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+      {items.length > 8 && <p className="border-t border-slate-100 px-4 py-2 text-xs text-slate-500">+{items.length - 8} more. Filter by status on the Workflows page.</p>}
+    </Card>
   )
 }
 
@@ -200,28 +243,68 @@ function FieldDashboard() {
   const { profile } = useAuth()
   const [tasks, setTasks] = useState(null)
   const load = useCallback(async () => {
-    const { data } = await supabase.from('tasks').select('id,status').eq('assigned_to', profile.id)
+    const { data } = await supabase.from('tasks')
+      .select('id,title,status,due_at,updated_at,crew_size,me:task_assignees!inner(worker_id),crew:task_assignees(is_lead,worker_id),incidents(reference_code,wards(name))')
+      .eq('me.worker_id', profile.id)
     setTasks(data || [])
   }, [profile.id])
   useEffect(() => { load() }, [load])
-  useRealtime('tasks', load, { filter: `assigned_to=eq.${profile.id}` })
+  useRealtime('tasks', load)
+  useRealtime('task_assignees', load, { filter: `worker_id=eq.${profile.id}` })
   if (!tasks) return <Spinner />
   const c = (s) => tasks.filter((t) => s.includes(t.status)).length
+  const open = tasks.filter((t) => !['completed', 'cancelled'].includes(t.status))
+  const overdue = open.filter((t) => isOverdue(t)).length
+  const next = sortTasks(open, 'due').slice(0, 4)
+  const onDuty = profile.on_duty !== false
   return (
     <>
-      <PageHeader title="Field operations" description={<Greeting />} actions={<Link to="/field"><Button><Smartphone className="h-4 w-4" />Open field portal</Button></Link>} />
+      <Hero icon={HardHat} eyebrow={profile.field_team || 'Field crew'} title="Field operations" subtitle={<Greeting />}
+        tone={onDuty ? 'from-ink-900 via-brand-900 to-brand-700' : 'from-ink-900 via-slate-800 to-slate-600'}
+        actions={<Link to="/field"><Button className="!bg-white !from-white !to-white !text-brand-800 hover:!bg-brand-50"><Smartphone className="h-4 w-4" />Open field portal</Button></Link>}
+        stats={[[onDuty ? 'On duty' : 'Off duty: no new tasks', '●'], ['open tasks', open.length], ['overdue', overdue]]} />
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatCard label="New assignments" value={c(['assigned'])} icon={ClipboardList} tone="sky" />
-        <StatCard label="In progress" value={c(['accepted', 'in_progress'])} icon={Clock} tone="amber" />
-        <StatCard label="Completed" value={c(['completed'])} icon={CheckCircle2} tone="green" />
-        <StatCard label="Failed" value={c(['failed'])} icon={AlertTriangle} tone="red" />
+        <StatCard index={0} label="New assignments" value={c(['assigned'])} icon={ClipboardList} tone="sky" />
+        <StatCard index={1} label="In progress" value={c(['accepted', 'in_progress'])} icon={Clock} tone="amber" />
+        <StatCard index={2} label="Completed" value={c(['completed'])} icon={CheckCircle2} tone="green" />
+        <StatCard index={3} label="Problems reported" value={c(['failed'])} icon={AlertTriangle} tone="red" />
       </div>
-      <Alert className="mt-5" title="Works offline">The field portal caches your tasks on this device. Updates made without signal are queued and synced automatically when you reconnect.</Alert>
+      <div className="mt-5 grid gap-5 xl:grid-cols-3">
+        <Card title="Next up" subtitle="Your open tasks, soonest due first" className="xl:col-span-2" bodyClass="p-0"
+          actions={<Link className="text-xs font-medium text-brand-700 hover:underline" to="/field">Open portal</Link>}>
+          {next.length === 0 ? <EmptyState icon={CheckCircle2} title="No open tasks">{onDuty ? 'New assignments appear here and in the field portal the moment a plan is dispatched.' : 'You are off duty, so no new tasks will be sent. Go on duty in the field portal.'}</EmptyState> : (
+            <ul className="divide-y divide-slate-100">
+              {next.map((t) => {
+                const { have, need } = staffing(t)
+                const lead = t.crew?.some((m) => m.is_lead && m.worker_id === profile.id)
+                return (
+                  <li key={t.id}>
+                    <Link to="/field" className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 hover:bg-slate-50">
+                      <div className="min-w-0 flex-1">
+                        <p className="flex min-w-0 items-center gap-1 font-medium text-slate-800">{lead && <Crown className="h-3.5 w-3.5 shrink-0 text-amber-500" aria-label="You lead this crew" />}<span className="truncate">{t.title}</span></p>
+                        <p className="flex items-center gap-1 text-xs text-slate-500"><MapPin className="h-3 w-3" aria-hidden />{t.incidents?.reference_code} · {t.incidents?.wards?.name} · crew {have}/{need} · due {fmtDateTime(t.due_at)}</p>
+                      </div>
+                      <span className="flex items-center gap-2">
+                        {isOverdue(t) && <span className="inline-flex items-center gap-1 rounded bg-red-100 px-1.5 text-xs font-medium text-red-700"><AlarmClock className="h-3 w-3" aria-hidden />overdue</span>}
+                        <StatusBadge status={t.status} />
+                      </span>
+                    </Link>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+        </Card>
+        <Card title="Your shift">
+          <p className={`flex items-center gap-2 text-sm font-medium ${onDuty ? 'text-emerald-700' : 'text-slate-600'}`}><Power className="h-4 w-4" aria-hidden />{onDuty ? 'On duty: new tasks can reach you' : 'Off duty: no new tasks'}</p>
+          <p className="mt-2 text-sm text-slate-600">Team: <strong>{profile.field_team || 'none on record (any task)'}</strong></p>
+          <p className="mt-3 text-xs text-slate-500">The field portal keeps your tasks on this phone. Updates made without signal are queued and synced when you reconnect, with the GPS position recorded when you start and finish.</p>
+        </Card>
+      </div>
     </>
   )
 }
 
-// ---------------------------------------------------------------- shared hero banner
 function Hero({ icon: Icon, eyebrow, title, subtitle, actions, stats = [], tone = 'from-ink-900 via-brand-900 to-brand-700' }) {
   return (
     <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}
@@ -251,7 +334,6 @@ function Hero({ icon: Icon, eyebrow, title, subtitle, actions, stats = [], tone 
   )
 }
 
-// ---------------------------------------------------------------- NGO coordinator: humanitarian view
 function NgoDashboard() {
   const { profile, org } = useAuth()
   const [needs, setNeeds] = useState(null)

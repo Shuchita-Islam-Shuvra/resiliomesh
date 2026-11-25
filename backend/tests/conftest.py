@@ -5,15 +5,17 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-os.environ.setdefault("DATABASE_URL", "")          # unit tests never touch a DB
+os.environ.setdefault("DATABASE_URL", "")
 os.environ.setdefault("WORKER_IN_PROCESS", "false")
 
-from app.core.auth import CurrentUser, get_current_user  # noqa: E402
+from app.core.auth import CurrentUser, get_current_user
 
 
 def make_user(role: str) -> CurrentUser:
+    role, _, scope = role.partition(":")
     return CurrentUser(id="00000000-0000-0000-0000-0000000000aa", email=f"{role}@test.local",
-                       role=role, organization_id=None, full_name=f"Test {role}")
+                       role=role, organization_id=None, full_name=f"Test {role}",
+                       admin_scope=(scope or "owner") if role == "admin" else None)
 
 
 @pytest.fixture

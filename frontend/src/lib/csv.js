@@ -1,7 +1,3 @@
-/**
- * Minimal RFC 4180 CSV parser (quoted fields, escaped quotes, CRLF, BOM).
- * Returns an array of objects keyed by the lower-cased, trimmed header names.
- */
 export function parseCsv(text) {
   const rows = []
   let row = [], field = '', quoted = false

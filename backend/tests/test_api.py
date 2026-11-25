@@ -1,4 +1,3 @@
-"""M03 auth/authorization + M06 validation at the HTTP layer."""
 from app.core.ratelimit import SlidingWindowLimiter
 
 
@@ -32,6 +31,11 @@ def test_only_admin_can_toggle_chaos(client_as):
     assert r.status_code == 200
 
 
+def test_chaos_is_for_the_system_owner_not_the_access_reviewer(client_as):
+    r = client_as("admin:reviewer").post("/api/admin/chaos", json={"weather_mode": "timeout"})
+    assert r.status_code == 403 and "system owner" in r.text
+
+
 def test_invalid_payloads_return_structured_422(client_as):
     c = client_as("city_officer")
     r = c.post("/api/plans/optimize", json={"incident_ids": ["not-a-uuid"]})
@@ -58,8 +62,8 @@ def test_simulate_rejects_unknown_features(client_as):
 def test_rate_limiter_sliding_window():
     lim = SlidingWindowLimiter(limit=3, window_s=60)
     assert [lim.allow("u", now=t)[0] for t in (0, 1, 2, 3)] == [True, True, True, False]
-    assert lim.allow("u", now=61)[0] is True       # window slid
-    assert lim.allow("other", now=3)[0] is True    # per-identity buckets
+    assert lim.allow("u", now=61)[0] is True
+    assert lim.allow("other", now=3)[0] is True
 
 
 def test_ngo_coordinator_cannot_run_pump_and_crew_optimizer_or_workflows(client_as):

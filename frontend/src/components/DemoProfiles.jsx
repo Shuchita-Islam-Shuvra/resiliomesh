@@ -5,33 +5,31 @@ import { PasswordInput } from './PasswordInput'
 import { useAuth } from '../context/AuthContext'
 import { ROLE_BY_KEY } from '../lib/roles'
 
-// Demo people (created by scripts/seed_demo.py). The server maps each key to its
-// account; the password and the judge access code never appear in the website.
 export const DEMO_PROFILES = [
-  { key: 'citizen', name: 'Arif Chowdhury', role: 'citizen', place: 'Dhaka South', does: 'Report waterlogging with GPS and depth, then follow it to resolution.' },
   { key: 'officer_south', name: 'Tanvir Hasan', role: 'city_officer', place: 'Dhaka South', does: 'Verify reports, run AI risk scoring and approve pump & crew plans in Dhaka South.' },
   { key: 'officer_north', name: 'Nusrat Jahan', role: 'city_officer', place: 'Dhaka North', does: 'Same tools for Dhaka North. Sees only Dhaka North: no South report, ward or map area.' },
   { key: 'ngo', name: 'Sabrina Akter', role: 'ngo_coordinator', place: 'Shobar Jonno · Dhaka South', does: 'Responsible for Dhaka South needs: log them, allocate relief, ask Dhaka North for backup.' },
   { key: 'ngo_north', name: 'Mahmud Karim', role: 'ngo_coordinator', place: 'Nodi Humanitarian · Dhaka North', does: 'Responsible for Dhaka North needs, and helps Dhaka South when they ask for backup.' },
-  { key: 'field', name: 'Rafiqul Islam', role: 'field_worker', place: 'Dhaka South', does: 'Receive Dhaka South field tasks on the phone and update them offline.' },
-  { key: 'admin', name: 'Farhana Rahman', role: 'admin', place: 'Platform operations', does: 'Approve staff access, read the audit log, check system health.' },
-  { key: 'admin2', name: 'Kamal Hossain', role: 'admin', place: 'Second approver', does: 'Second admin for two-person approval of officer and admin access.' },
+  { key: 'field', name: 'Rafiqul Islam', role: 'field_worker', place: 'Drainage crew · Dhaka South', does: 'Drain-clearing tasks in Dhaka South, on the phone, offline too.' },
+  { key: 'field_pump_south', name: 'Jahangir Alam', role: 'field_worker', place: 'Pump operator · Dhaka South', does: 'Runs Dhaka South City Corporation pumps; gets pump deployment tasks.' },
+  { key: 'field_drain_south', name: 'Sohel Rana', role: 'field_worker', place: 'Drainage crew · Dhaka South', does: 'Second Dhaka South drainage worker: shares crews with Rafiqul.' },
+  { key: 'field_north', name: 'Shahidul Alam', role: 'field_worker', place: 'Pump operator · Dhaka North', does: 'Runs Dhaka North City Corporation pumps; never gets Dhaka South tasks.' },
+  { key: 'field_drain_north', name: 'Rubina Khatun', role: 'field_worker', place: 'Drainage crew · Dhaka North', does: 'Drain-clearing tasks in Dhaka North.' },
+  { key: 'field_relief', name: 'Mitu Begum', role: 'field_worker', place: 'Relief team · Shobar Jonno (NGO)', does: 'Carries the NGO relief kits anywhere in Dhaka.' },
+  { key: 'field_medical', name: 'Nasima Akter', role: 'field_worker', place: 'Medical / first aid · Nodi (NGO)', does: 'Medical kits and first aid anywhere in Dhaka.' },
+  { key: 'admin', name: 'Farhana Rahman', role: 'admin', place: 'System owner', does: 'Sets the platform up (roster, NGOAB registry, official domains, fault injection) and reviews access with the second admin.' },
+  { key: 'admin2', name: 'Kamal Hossain', role: 'admin', place: 'Security & audit officer', does: 'Reviews access requests, approves the system owner\'s proposals, watches the audit log, revokes at once. Cannot change platform set-up.' },
+  { key: 'citizen', name: 'Arif Chowdhury', role: 'citizen', place: 'Lives in Dhaka South', does: 'Report waterlogging with GPS and depth, follow it to resolution, see the live risk map of Dhaka South.' },
+  { key: 'citizen_north', name: 'Lamia Sultana', role: 'citizen', place: 'Lives in Dhaka North', does: 'Report waterlogging with GPS and depth, follow it to resolution, see the live risk map of Dhaka North.' },
 ]
 
 const CODE_KEY = 'rm.judgeCode'
 const readCode = () => { try { return localStorage.getItem(CODE_KEY) || '' } catch { return '' } }
-const saveCode = (c) => { try { c ? localStorage.setItem(CODE_KEY, c) : localStorage.removeItem(CODE_KEY) } catch { /* storage blocked */ } }
+const saveCode = (c) => { try { c ? localStorage.setItem(CODE_KEY, c) : localStorage.removeItem(CODE_KEY) } catch { } }
 const initials = (name) => name.split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase()
 
-/**
- * "Demo accounts for judges" box under the sign-in form: one click per account, no password. When the server requires an access code
- * (DEMO_ACCESS_CODE set) it is asked once, or comes from a private link /login#code=....
- * `role` = the open role tab; only that role's demo accounts are shown.
- */
 export default function DemoProfiles({ role, busy, setBusy, codeRequired: serverNeedsCode = false, onSignedIn }) {
   const { signInDemo } = useAuth()
-  // Private judge link: /login#code=XXXX fills the code once and removes it from the address bar
-  // (the #fragment is never sent to any server, so it does not end up in logs).
   const [code, setCode] = useState(() => {
     const fromLink = new URLSearchParams(window.location.hash.slice(1)).get('code')
     if (fromLink) {
@@ -41,24 +39,21 @@ export default function DemoProfiles({ role, busy, setBusy, codeRequired: server
     }
     return readCode()
   })
-  // once a code is known the box is hidden: judges just click a profile
   const [showCode, setShowCode] = useState(() => !code)
   const [codeError, setCodeError] = useState('')
-  const [askedForCode, setAskedForCode] = useState(false)   // server answered DEMO_CODE
+  const [askedForCode, setAskedForCode] = useState(false)
   const codeRequired = serverNeedsCode || askedForCode
   const [error, setError] = useState('')
   const [active, setActive] = useState(null)
   const [slow, setSlow] = useState(false)
   const codeRef = useRef(null)
 
-  // free hosting sleeps: after a few seconds, explain the wait instead of looking frozen
   useEffect(() => {
     if (!active) { setSlow(false); return undefined }
     const t = setTimeout(() => setSlow(true), 4000)
     return () => clearTimeout(t)
   }, [active])
 
-  // only the demo accounts of the role tab that is open (switch tabs above for other roles)
   const profiles = role ? DEMO_PROFILES.filter((p) => p.role === role) : DEMO_PROFILES
 
   const pick = async (p) => {
@@ -76,7 +71,7 @@ export default function DemoProfiles({ role, busy, setBusy, codeRequired: server
       saveCode(code.trim())
       onSignedIn(r)
     } catch (e) {
-      if (e.code === 'DEMO_CODE') {      // the server asks for a code (DEMO_ACCESS_CODE is set)
+      if (e.code === 'DEMO_CODE') {
         saveCode(''); setAskedForCode(true); setShowCode(true); setCodeError(e.message)
         setTimeout(() => codeRef.current?.focus(), 0)
       }

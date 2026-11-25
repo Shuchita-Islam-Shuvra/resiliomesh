@@ -2,7 +2,6 @@ import { GitMerge } from 'lucide-react'
 import { Button, Modal } from './ui'
 import { fmtDateTime, humanize } from '../lib/format'
 
-/** Shown when an optimistic-lock version check fails (A01 conflict detection). */
 export default function ConflictDialog({ conflict, onReload, onClose, fields = [] }) {
   if (!conflict) return null
   const { mine = {}, theirs = {} } = conflict

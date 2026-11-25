@@ -1,12 +1,3 @@
-"""One person, one NGO Coordinator post (migration 010) against a REAL database.
-
-NGO coordinators and field workers serve the whole city (no Dhaka North / South
-split). A coordinator is employed by one NGO, so the same person (same Bangladeshi
-mobile number) must not hold a second coordinator post, or another staff post
-next to it, on another account. A move to another NGO is a two-admin transfer.
-
-    TEST_DATABASE_URL=postgresql://... pytest tests/test_db_ngo_seat.py -v
-"""
 import uuid
 
 import pytest
@@ -45,7 +36,6 @@ def admins():
 
 
 def apply_as_coordinator(org, phone):
-    """Self-service sign-up as NGO Coordinator, with the ID card uploaded."""
     with raw() as c:
         uid = new_auth_user(c, "applicant", email=f"{uuid.uuid4().hex[:8]}@relief-ngo.org.bd",
                             meta={"requested_role": "ngo_coordinator", "organization_id": org, "phone": phone or "",
@@ -72,12 +62,11 @@ def profile(uid):
         return c.execute("select role::text, organization_id::text org, is_active from profiles where id=%s", (uid,)).fetchone()
 
 
-# ------------------------------------------------------------------ the rule
 def test_same_person_cannot_become_coordinator_of_a_second_ngo(admins):
     a1, a2 = admins
     phone = bd_mobile()
-    staff("ngo_coordinator", SHOBAR, phone)                    # already coordinates Shobar Jonno
-    uid, rid = apply_as_coordinator(NODI, phone)               # second account, other NGO, same mobile
+    staff("ngo_coordinator", SHOBAR, phone)
+    uid, rid = apply_as_coordinator(NODI, phone)
 
     v = checks(a1, rid)
     assert "ngo_seat_taken" in v["blockers"]
@@ -107,11 +96,11 @@ def test_guard_holds_even_for_direct_sql_and_frees_the_mobile_when_the_post_ends
     first = staff("ngo_coordinator", SHOBAR, phone)
     with raw() as c:
         other = new_auth_user(c, "dup")
-        c.execute("update profiles set phone=%s where id=%s", (phone, other))      # a citizen may share it
+        c.execute("update profiles set phone=%s where id=%s", (phone, other))
         with pytest.raises(psycopg.Error, match="only one NGO Coordinator post"):
             c.execute("update profiles set role='ngo_coordinator', organization_id=%s where id=%s", (NODI, other))
     with raw() as c:
-        c.execute("update profiles set is_active=false where id=%s", (first,))     # left Shobar Jonno
+        c.execute("update profiles set is_active=false where id=%s", (first,))
         c.execute("update profiles set role='ngo_coordinator', organization_id=%s where id=%s", (NODI, other))
     assert profile(other)["org"] == NODI
 
@@ -143,10 +132,9 @@ def test_moving_to_another_ngo_is_a_two_admin_transfer(admins):
     assert v["required_approvals"] == 2 and "ngo_seat_taken" not in v["blockers"]
     assert review(a2, rid)["status"] == "approved"
     p = profile(coord)
-    assert p["role"] == "ngo_coordinator" and p["org"] == NODI      # one post: the Shobar post ended
+    assert p["role"] == "ngo_coordinator" and p["org"] == NODI
 
 
-# ------------------------------------------------------------------ NGOs may LOG needs in both areas (responsibility per area: 014)
 def test_ngo_coordinator_works_in_both_dhaka_north_and_south():
     coord = staff("ngo_coordinator", SHOBAR, bd_mobile())
     with as_user(coord) as c:

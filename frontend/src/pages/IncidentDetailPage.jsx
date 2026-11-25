@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import { ArrowLeft, BrainCircuit, CheckCircle2, Copy, Eye, RefreshCw, ShieldAlert, ShieldX, Users } from 'lucide-react'
 import ConflictDialog from '../components/ConflictDialog'
 import MapView from '../components/MapView'
+import TaskCrewCard, { TASK_CREW_SELECT } from '../components/TaskCrewCard'
 import { Alert, Button, Card, EmptyState, Field, Modal, PageHeader, RiskBadge, Select, Spinner, StatusBadge, Textarea } from '../components/ui'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
@@ -26,13 +27,12 @@ export default function IncidentDetailPage() {
   const [busy, setBusy] = useState('')
   const [conflict, setConflict] = useState(null)
   const [changedBanner, setChangedBanner] = useState(false)
-  const [modal, setModal] = useState(null)      // 'reject' | 'duplicate'
+  const [modal, setModal] = useState(null)
   const [note, setNote] = useState('')
   const [dupOf, setDupOf] = useState('')
   const [nearby, setNearby] = useState([])
   const peers = usePresence(`incident:${id}`, profile)
   const wardArea = inc?.wards?.city_corporation
-  // Water Resilience Officers act only in their own area (Dhaka North / South); admins everywhere
   const officer = hasRole('city_officer', 'admin') && canManageArea(wardArea)
   const outsideArea = hasRole('city_officer') && inc && !officer
 
@@ -45,13 +45,12 @@ export default function IncidentDetailPage() {
     const [h, ra, t] = await Promise.all([
       supabase.from('incident_status_history').select('*, profiles(full_name,role)').eq('incident_id', id).order('created_at'),
       isStaff ? supabase.from('risk_assessments').select('*').eq('incident_id', id).order('created_at', { ascending: false }).limit(1) : { data: [] },
-      isStaff ? supabase.from('tasks').select('id,title,status,task_type,updated_at,assignee:profiles!tasks_assigned_to_fkey(full_name)').eq('incident_id', id).order('created_at') : { data: [] },
+      isStaff ? supabase.from('tasks').select(TASK_CREW_SELECT).eq('incident_id', id).order('created_at') : { data: [] },
     ])
     setHistory(h.data || []); setAssessment(ra.data?.[0] || null); setTasks(t.data || [])
   }, [id, isStaff])
   useEffect(() => { load() }, [load])
 
-  // someone else changed this incident while I'm looking at it -> live refresh + banner
   useRealtime('incidents', (p) => {
     if (p.new?.id !== id) return
     setChangedBanner(p.new.version !== inc?.version)
@@ -155,20 +154,7 @@ export default function IncidentDetailPage() {
 
           {isStaff && assessment && <ExplainCard a={assessment} />}
 
-          {isStaff && (
-            <Card title="Field tasks" subtitle="Created automatically by the dispatch workflow">
-              {tasks.length === 0 ? <p className="text-sm text-slate-500">No tasks yet.</p> : (
-                <ul className="divide-y divide-slate-100 text-sm">
-                  {tasks.map((t) => (
-                    <li key={t.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
-                      <span>{t.title} <span className="text-xs text-slate-500">· {t.assignee?.full_name || 'unassigned'}</span></span>
-                      <StatusBadge status={t.status} />
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </Card>
-          )}
+          {isStaff && <TaskCrewCard incident={inc} tasks={tasks} canManage={officer} onChanged={load} />}
         </div>
 
         <Card title="Timeline">

@@ -1,9 +1,3 @@
-"""Supabase JWT verification + role-based dependencies.
-
-Supports both Supabase signing schemes:
-  * new asymmetric keys (ES256/RS256) via the project's JWKS endpoint
-  * legacy HS256 shared secret (SUPABASE_JWT_SECRET)
-"""
 from __future__ import annotations
 
 import time
@@ -29,10 +23,15 @@ class CurrentUser:
     role: str
     organization_id: str | None
     full_name: str | None = None
+    admin_scope: str | None = None
 
     @property
     def is_admin(self) -> bool:
         return self.role == "admin"
+
+    @property
+    def is_system_owner(self) -> bool:
+        return self.role == "admin" and self.admin_scope == "owner"
 
 
 def _jwks() -> jwt.PyJWKClient:
@@ -60,17 +59,10 @@ def decode_token(token: str) -> dict:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, f"Invalid token: {exc}")
 
 
-_effective_role_sql: bool | None = None     # None = not probed yet; False = migration 008 not applied
+_effective_role_sql: bool | None = None
 
 
 def load_profile(user_id: str, session_id: str | None = None, aal: str | None = None) -> dict:
-    """Profile with the *effective* role for this JWT session.
-
-    Staff privileges are bound to a session that passed the server-side staff-ID
-    check (and TOTP where required) — see rm_effective_role() in migration 008.
-    A password-only session of a staff account is treated as a citizen here too,
-    so the API cannot be used to bypass the second sign-in step.
-    """
     global _effective_role_sql
     now = time.time()
     key = f"{user_id}|{session_id}|{aal}"
@@ -81,16 +73,17 @@ def load_profile(user_id: str, session_id: str | None = None, aal: str | None = 
         row = None
         if _effective_role_sql is not False:
             try:
-                with conn.transaction():          # savepoint: a missing function must not poison the tx
+                with conn.transaction():
                     row = db.fetch_one(
                         conn,
                         """select id, email, full_name, organization_id, is_active, role::text as account_role,
+                                  to_jsonb(profiles)->>'admin_scope' as admin_scope,
                                   rm_effective_role(id, %s::uuid, %s)::text as role
                              from profiles where id = %s""",
                         (session_id, aal or "aal1", user_id),
                     )
                 _effective_role_sql = True
-            except psycopg.errors.UndefinedFunction:   # migration 008 not applied yet
+            except psycopg.errors.UndefinedFunction:
                 _effective_role_sql = False
         if _effective_role_sql is False:
             row = db.fetch_one(
@@ -124,8 +117,17 @@ def get_current_user(request: Request) -> CurrentUser:
         role=profile["role"],
         organization_id=str(profile["organization_id"]) if profile["organization_id"] else None,
         full_name=profile.get("full_name"),
+        admin_scope=profile.get("admin_scope"),
     )
     request.state.user = user
+    return user
+
+
+def require_system_owner(user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
+    if user.role != "admin":
+        raise HTTPException(status.HTTP_403_FORBIDDEN, f"Role '{user.role}' is not allowed to perform this action")
+    if not user.is_system_owner:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Only the system owner can do this. Your admin duty is access review and audit.")
     return user
 
 
@@ -140,5 +142,4 @@ def require_roles(*roles: str) -> Callable[[CurrentUser], CurrentUser]:
 
 STAFF = ("city_officer", "ngo_coordinator", "field_worker", "admin")
 COORDINATORS = ("city_officer", "ngo_coordinator", "admin")
-# Pump / crew planning and the dispatch workflow belong to Water Resilience Officers (015).
 OFFICERS = ("city_officer", "admin")

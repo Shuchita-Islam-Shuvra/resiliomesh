@@ -15,7 +15,7 @@ import { validateResource } from '../lib/validation'
 export default function ResourcesPage() {
   const [params, setParams] = useSearchParams()
   const { hasRole } = useAuth()
-  const planner = hasRole('city_officer', 'admin')   // pump & crew plans are the officers' job (015)
+  const planner = hasRole('city_officer', 'admin')
   const asked = params.get('tab') || 'inventory'
   const tab = asked === 'plans' && !planner ? 'inventory' : asked
   return (
@@ -32,7 +32,6 @@ export default function ResourcesPage() {
   )
 }
 
-// ---------------------------------------------------------------- inventory
 function Inventory() {
   const { profile, hasRole } = useAuth()
   const toast = useToast()
@@ -51,8 +50,6 @@ function Inventory() {
   useEffect(() => { load(); supabase.from('organizations').select('id,name,type').then(({ data }) => setOrgs(data || [])) }, [load])
   useRealtime('resources', useDebouncedCallback(load, 500))
 
-  // Each role sees its own kind of stock (migration 016 enforces the same in the database):
-  // NGO coordinator = own NGO's relief stock, officer = city-authority equipment, admin = all.
   const isNgo = hasRole('ngo_coordinator')
   const isOfficer = hasRole('city_officer')
   const mine = useCallback((r) => isNgo ? r.organization_id === profile.organization_id
@@ -157,9 +154,8 @@ function Inventory() {
   )
 }
 
-// ---------------------------------------------------------------- optimiser & plans
 function Plans({ preselect }) {
-  const { hasRole } = useAuth()
+  const { hasRole, isSystemOwner } = useAuth()
   const toast = useToast()
   const [incidents, setIncidents] = useState([])
   const [selected, setSelected] = useState(preselect ? [preselect] : [])
@@ -204,7 +200,7 @@ function Plans({ preselect }) {
       if (error) throw error
       if (data.conflict) { toast.warning('Plan was modified by someone else — reloaded.'); load(); return }
       toast.success(data.replayed ? 'Plan was already approved (duplicate click ignored).' : 'Approved. Dispatch workflow queued.')
-      api('/api/workflows/process-now', { method: 'POST' }).catch(() => {})   // nudge worker on sleepy hosts
+      api('/api/workflows/process-now', { method: 'POST' }).catch(() => {})
       load()
     } catch (e) { toast.error(errorMessage(e)) } finally { setBusy('') }
   }
@@ -252,7 +248,7 @@ function Plans({ preselect }) {
       {result && <PlanResult out={result} />}
 
       <Card title="3 · Plans" subtitle="Approve to trigger the automated dispatch workflow"
-        actions={hasRole('admin') && (
+        actions={isSystemOwner && (
           <label className="flex items-center gap-2 text-xs text-slate-600">Fault injection
             <Select className="!w-auto !py-1 text-xs" value={inject} onChange={(e) => setInject(e.target.value)}>
               <option value="">none</option>{['reserve_resources', 'create_tasks', 'notify_teams', 'activate_incidents'].map((s) => <option key={s} value={s}>fail at {s}</option>)}
@@ -329,7 +325,6 @@ function PlanResult({ out }) {
   )
 }
 
-// ---------------------------------------------------------------- allocations
 function Allocations() {
   const { profile, hasRole } = useAuth()
   const isNgo = hasRole('ngo_coordinator')

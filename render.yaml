@@ -1,4 +1,3 @@
-# Render Blueprint: ONE web service = website + API + in-process workflow worker (root Dockerfile).
 services:
   - type: web
     name: resiliomesh
@@ -8,19 +7,16 @@ services:
     dockerContext: .
     healthCheckPath: /health
     envVars:
-      # build time (baked into the website bundle; public values)
       - key: VITE_SUPABASE_URL
         sync: false
       - key: VITE_SUPABASE_ANON_KEY
         sync: false
-      # run time (secret: never commit)
       - key: SUPABASE_URL
         sync: false
       - key: DATABASE_URL
         sync: false
-      - key: SUPABASE_JWT_SECRET   # only if the Supabase project still signs with legacy HS256
+      - key: SUPABASE_JWT_SECRET
         sync: false
-      # judge demo sign-in (docs/API_SETUP.md): secrets, shared privately; DEMO_MODE=false turns it off
       - key: DEMO_MODE
         sync: false
       - key: DEMO_PASSWORD

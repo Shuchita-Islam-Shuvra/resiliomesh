@@ -1,11 +1,3 @@
--- ResilioMesh: 002 + 003 + 004 + 005 + seed + 006 + 007 + 008 + 009 + 010 + 011 + 012 + 013 + 014 + 015 + 016 in ONE file (run after 001_schema.sql)
-
--- ================= migrations/002_functions_triggers.sql =================
--- =====================================================================
--- ResilioMesh — 002 helper functions, triggers, business-rule guards
--- =====================================================================
-
--- ---------- Identity helpers (used by RLS) --------------------------
 create or replace function public.rm_role() returns app_role
 language sql stable security definer set search_path = public as $$
   select role from profiles where id = auth.uid() and is_active
@@ -22,20 +14,17 @@ language sql stable security definer set search_path = public as $$
                    from profiles where id = auth.uid() and is_active), false)
 $$;
 
--- System context = trusted backend connection (no end-user JWT).
 create or replace function public.rm_is_system() returns boolean
 language sql stable as $$
   select auth.uid() is null
      and coalesce(auth.role(), '') not in ('anon','authenticated')
 $$;
 
--- Actor for audit: JWT user, or backend-provided actor via set_config('rm.actor', ...)
 create or replace function public.rm_actor() returns uuid
 language sql stable as $$
   select coalesce(auth.uid(), nullif(current_setting('rm.actor', true), '')::uuid)
 $$;
 
--- ---------- Generic touch / optimistic-lock version bump ------------
 create or replace function public.rm_touch_versioned() returns trigger
 language plpgsql as $$
 begin
@@ -64,8 +53,6 @@ begin
   end loop;
 end $$;
 
--- ---------- New auth user -> profile (always citizen) ---------------
--- Privilege escalation protection: self-registration can never pick a role.
 create or replace function public.handle_new_user() returns trigger
 language plpgsql security definer set search_path = public as $$
 declare v_ward text;
@@ -91,7 +78,6 @@ drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created after insert on auth.users
   for each row execute function public.handle_new_user();
 
--- Only admins (or the backend/system) may change role / org / active flag.
 create or replace function public.rm_guard_profile() returns trigger
 language plpgsql security definer set search_path = public as $$
 begin
@@ -113,7 +99,6 @@ drop trigger if exists trg_guard_profile on profiles;
 create trigger trg_guard_profile before update on profiles
   for each row execute function rm_guard_profile();
 
--- ---------- Incident state machine ----------------------------------
 create or replace function public.rm_incident_transition_allowed(p_from incident_status, p_to incident_status)
 returns boolean language sql immutable as $$
   select case p_from
@@ -123,7 +108,7 @@ returns boolean language sql immutable as $$
     when 'approved'    then p_to in ('in_progress','assessed')
     when 'in_progress' then p_to in ('resolved','assessed')
     when 'duplicate'   then p_to in ('verified')
-    else false            -- resolved / rejected are terminal
+    else false
   end
 $$;
 
@@ -131,7 +116,6 @@ create or replace function public.rm_incident_before_insert() returns trigger
 language plpgsql security definer set search_path = public as $$
 declare v_dup uuid;
 begin
-  -- clients can never forge reporter, status, or AI fields
   if not rm_is_system() then
     new.reporter_id := auth.uid();
     new.status := 'reported';
@@ -139,7 +123,6 @@ begin
     new.verified_by := null; new.duplicate_of := null;
   end if;
 
-  -- Geospatial duplicate detection: same category within 150 m in the last 6 h
   select i.id into v_dup
   from incidents i
   where i.category = new.category
@@ -193,7 +176,6 @@ begin
     if new.status = 'resolved' then new.resolved_at := now(); end if;
   end if;
 
-  -- citizens may only edit text of their own report while it is still 'reported'
   if not rm_is_system()
      and coalesce(current_setting('rm.internal', true), 'off') <> 'on'
      and coalesce(rm_role()::text,'citizen') = 'citizen' then
@@ -227,7 +209,6 @@ drop trigger if exists trg_incident_after_update on incidents;
 create trigger trg_incident_after_update after update on incidents
   for each row execute function rm_incident_after_update();
 
--- ---------- Community-need duplicate detection ----------------------
 create or replace function public.rm_need_before_insert() returns trigger
 language plpgsql security definer set search_path = public as $$
 declare v_dup uuid;
@@ -261,7 +242,6 @@ drop trigger if exists trg_need_before_insert on community_needs;
 create trigger trg_need_before_insert before insert on community_needs
   for each row execute function rm_need_before_insert();
 
--- ---------- Audit logging (append-only) -----------------------------
 create or replace function public.rm_audit() returns trigger
 language plpgsql security definer set search_path = public as $$
 declare v_id text;
@@ -288,7 +268,6 @@ begin
   end loop;
 end $$;
 
--- audit_logs is immutable even for table owners going through the API
 create or replace function public.rm_block_audit_mutation() returns trigger
 language plpgsql as $$
 begin
@@ -299,18 +278,10 @@ drop trigger if exists trg_audit_immutable on audit_logs;
 create trigger trg_audit_immutable before update or delete on audit_logs
   for each row execute function rm_block_audit_mutation();
 
--- ================= migrations/003_rls.sql =================
--- =====================================================================
--- ResilioMesh — 003 Row Level Security (organisation + role isolation)
--- =====================================================================
-
--- Explicit grants (works even if "Grant API access to new tables automatically" is off).
--- Real access control is enforced by the RLS policies below.
 grant usage on schema public to anon, authenticated, service_role;
 grant select, insert, update, delete on all tables in schema public to authenticated, service_role;
 grant usage, select on all sequences in schema public to authenticated, service_role;
 
--- anon gets nothing except ward geography
 revoke all on all tables in schema public from anon;
 revoke all on all sequences in schema public from anon;
 grant select on wards to anon;
@@ -333,7 +304,6 @@ alter table weather_cache           enable row level security;
 alter table historical_flood_events enable row level security;
 alter table audit_logs              enable row level security;
 
--- helper: drop all existing policies so this file is re-runnable
 do $$
 declare r record;
 begin
@@ -342,7 +312,6 @@ begin
   end loop;
 end $$;
 
--- ---------- organizations / wards (reference data) ------------------
 create policy org_read on organizations for select to authenticated using (true);
 create policy org_admin_write on organizations for all to authenticated
   using (rm_role() = 'admin') with check (rm_role() = 'admin');
@@ -351,15 +320,12 @@ create policy wards_read on wards for select to anon, authenticated using (true)
 create policy wards_admin_write on wards for update to authenticated
   using (rm_role() = 'admin') with check (rm_role() = 'admin');
 
--- ---------- profiles ------------------------------------------------
 create policy profiles_self_read on profiles for select to authenticated
   using (id = auth.uid() or rm_is_staff());
 create policy profiles_self_update on profiles for update to authenticated
   using (id = auth.uid() or rm_role() = 'admin')
   with check (id = auth.uid() or rm_role() = 'admin');
--- (role/org changes are additionally blocked by trg_guard_profile)
 
--- ---------- drainage assets -----------------------------------------
 create policy assets_read on drainage_assets for select to authenticated using (true);
 create policy assets_write on drainage_assets for insert to authenticated
   with check (rm_role() in ('city_officer','admin'));
@@ -369,8 +335,6 @@ create policy assets_update on drainage_assets for update to authenticated
 create policy assets_delete on drainage_assets for delete to authenticated
   using (rm_role() = 'admin');
 
--- ---------- incidents -----------------------------------------------
--- citizens: only their own reports; staff: everything
 create policy incidents_read on incidents for select to authenticated
   using (reporter_id = auth.uid() or rm_is_staff());
 create policy incidents_insert on incidents for insert to authenticated
@@ -387,7 +351,6 @@ create policy ish_read on incident_status_history for select to authenticated
 create policy risk_read on risk_assessments for select to authenticated
   using (rm_is_staff());
 
--- ---------- resources (org-scoped writes) ---------------------------
 create policy resources_read on resources for select to authenticated using (rm_is_staff());
 create policy resources_insert on resources for insert to authenticated
   with check (rm_role() = 'admin'
@@ -400,26 +363,22 @@ create policy resources_update on resources for update to authenticated
 create policy resources_delete on resources for delete to authenticated
   using (rm_role() = 'admin' or (rm_role() = 'ngo_coordinator' and organization_id = rm_org()));
 
--- ---------- community needs -----------------------------------------
 create policy needs_read on community_needs for select to authenticated
   using (rm_is_staff() or submitted_by = auth.uid());
 create policy needs_insert on community_needs for insert to authenticated
-  with check (true);           -- trigger forces submitted_by/status
+  with check (true);
 create policy needs_update on community_needs for update to authenticated
   using (rm_role() in ('ngo_coordinator','admin'))
   with check (rm_role() in ('ngo_coordinator','admin'));
 
--- ---------- plans / allocations / tasks / workflows -----------------
 create policy plans_read on allocation_plans for select to authenticated
   using (rm_role() in ('city_officer','ngo_coordinator','admin'));
--- writes only through RPC / backend
 
 create policy alloc_read on allocations for select to authenticated
   using (rm_role() in ('city_officer','ngo_coordinator','admin'));
 
 create policy tasks_read on tasks for select to authenticated
   using (assigned_to = auth.uid() or rm_role() in ('city_officer','ngo_coordinator','admin'));
--- task updates only through update_task_status() RPC (version-checked)
 
 create policy runs_read on workflow_runs for select to authenticated
   using (rm_role() in ('city_officer','ngo_coordinator','admin'));
@@ -431,17 +390,7 @@ create policy weather_read on weather_cache for select to authenticated using (t
 create policy hfe_read on historical_flood_events for select to authenticated using (rm_is_staff());
 
 create policy audit_read on audit_logs for select to authenticated using (rm_role() = 'admin');
--- no insert/update/delete policies: only SECURITY DEFINER trigger writes audit rows
 
--- ================= migrations/004_rpc.sql =================
--- =====================================================================
--- ResilioMesh — 004 transactional RPCs (concurrency, workflow, analytics)
--- =====================================================================
-
--- =====================================================================
--- A05: atomic, idempotent stock reservation with row-level locking
--- Internal (system) function: called by backend workflow + wrapper RPCs.
--- =====================================================================
 create or replace function public.rm_reserve_resource(
   p_resource_id uuid, p_qty integer, p_idempotency_key text,
   p_incident_id uuid default null, p_need_id uuid default null,
@@ -459,17 +408,14 @@ begin
     raise exception 'VALIDATION: idempotency key required' using errcode = '22023';
   end if;
 
-  -- fast path: replayed request returns the original result (idempotency)
   select * into v_alloc from allocations where idempotency_key = p_idempotency_key;
   if found then return v_alloc; end if;
 
-  -- serialize all reservations of this resource row
   select * into v_res from resources where id = p_resource_id for update;
   if not found then
     raise exception 'NOT_FOUND: resource %', p_resource_id using errcode = 'P0002';
   end if;
 
-  -- re-check after acquiring the lock: a concurrent duplicate may have committed
   select * into v_alloc from allocations where idempotency_key = p_idempotency_key;
   if found then return v_alloc; end if;
 
@@ -486,14 +432,12 @@ begin
     values (p_resource_id, p_incident_id, p_need_id, p_plan_id, p_qty, p_idempotency_key, coalesce(p_actor, rm_actor()))
     returning * into v_alloc;
   exception when unique_violation then
-    -- lost an idempotency race on another resource row: undo our decrement, return winner
     update resources set quantity_available = quantity_available + p_qty where id = p_resource_id;
     select * into v_alloc from allocations where idempotency_key = p_idempotency_key;
   end;
   return v_alloc;
 end $$;
 
--- compensation: idempotent release (returns stock exactly once)
 create or replace function public.rm_release_allocation(p_allocation_id uuid, p_reason text default 'released')
 returns allocations
 language plpgsql security definer set search_path = public as $$
@@ -514,10 +458,6 @@ end $$;
 revoke execute on function public.rm_reserve_resource(uuid,integer,text,uuid,uuid,uuid,uuid) from public, anon, authenticated;
 revoke execute on function public.rm_release_allocation(uuid,text) from public, anon, authenticated;
 
--- =====================================================================
--- NGO direct allocation to a community need (user-facing RPC)
--- "Multiple coordinators request the final available relief kit"
--- =====================================================================
 create or replace function public.allocate_to_need(
   p_need_id uuid, p_resource_id uuid, p_qty integer, p_idempotency_key text
 ) returns jsonb
@@ -572,9 +512,6 @@ begin
   return jsonb_build_object('ok', true, 'replayed', v_existing, 'allocation', to_jsonb(v_alloc));
 end $$;
 
--- =====================================================================
--- Incident transitions with optimistic locking (A01) + role rules (M04)
--- =====================================================================
 create or replace function public.transition_incident(
   p_incident_id uuid, p_to incident_status, p_expected_version integer,
   p_note text default null, p_duplicate_of uuid default null
@@ -593,7 +530,6 @@ begin
     return jsonb_build_object('ok', false, 'conflict', true, 'current', to_jsonb(v_inc));
   end if;
 
-  -- role rules per target state
   if p_to in ('verified','rejected','duplicate','resolved','assessed') and v_role not in ('city_officer','admin') then
     raise exception 'FORBIDDEN: % cannot move an incident to %', v_role, p_to using errcode = '42501';
   end if;
@@ -627,9 +563,6 @@ begin
   return jsonb_build_object('ok', true, 'incident', to_jsonb(v_inc));
 end $$;
 
--- =====================================================================
--- Plan approval: atomically approve + transition incidents + enqueue run
--- =====================================================================
 create or replace function public.approve_plan(
   p_plan_id uuid, p_expected_version integer, p_inject_failure text default null
 ) returns jsonb
@@ -653,7 +586,6 @@ begin
   select * into v_plan from allocation_plans where id = p_plan_id for update;
   if not found then raise exception 'NOT_FOUND: plan' using errcode = 'P0002'; end if;
 
-  -- idempotent approve: second click returns the same run
   if v_plan.status in ('approved','executing','executed') then
     select * into v_run from workflow_runs where plan_id = p_plan_id;
     return jsonb_build_object('ok', true, 'replayed', true, 'run_id', v_run.id);
@@ -681,7 +613,6 @@ begin
   update allocation_plans set status = 'approved', approved_by = auth.uid(), approved_at = now()
   where id = p_plan_id;
 
-  -- supersede other pending plans touching the same incidents
   update allocation_plans set status = 'superseded'
   where id <> p_plan_id and status = 'pending_approval' and incident_ids && v_plan.incident_ids;
 
@@ -716,7 +647,6 @@ begin
   return jsonb_build_object('ok', true);
 end $$;
 
--- admin: retry a failed / compensated run
 create or replace function public.retry_workflow_run(p_run_id uuid)
 returns jsonb language plpgsql security definer set search_path = public as $$
 declare v_run workflow_runs;
@@ -726,7 +656,6 @@ begin
   if v_run.status not in ('failed','compensated') then
     raise exception 'INVALID_STATE: only failed runs can be retried' using errcode = '23514';
   end if;
-  -- incidents were rolled back to 'assessed' by compensation; re-approve them
   perform set_config('rm.note', 'Workflow retry', true);
   update incidents i set status = 'approved'
     from allocation_plans p
@@ -741,7 +670,6 @@ begin
   return jsonb_build_object('ok', true);
 end $$;
 
--- worker: claim one runnable job (SKIP LOCKED queue; stale locks are reclaimed)
 create or replace function public.rm_claim_workflow_run(p_worker text)
 returns workflow_runs language plpgsql security definer set search_path = public as $$
 declare v_run workflow_runs;
@@ -762,9 +690,6 @@ begin
 end $$;
 revoke execute on function public.rm_claim_workflow_run(text) from public, anon, authenticated;
 
--- =====================================================================
--- Field task updates: version-checked, offline-sync friendly
--- =====================================================================
 create or replace function public.rm_task_transition_allowed(p_from task_status, p_to task_status)
 returns boolean language sql immutable as $$
   select case p_from
@@ -818,7 +743,6 @@ begin
     completed_at = case when p_status = 'completed' then now() else completed_at end
   where id = p_task_id returning * into v_task;
 
-  -- all tasks of the incident completed -> resolve incident, return reusable equipment
   if p_status = 'completed' then
     select count(*) into v_open from tasks
      where incident_id = v_task.incident_id and status not in ('completed','cancelled');
@@ -840,9 +764,6 @@ begin
   return jsonb_build_object('ok', true, 'task', to_jsonb(v_task));
 end $$;
 
--- =====================================================================
--- Geospatial helpers
--- =====================================================================
 create or replace function public.nearby_incidents(p_lat double precision, p_lng double precision, p_radius_m integer default 500)
 returns table(id uuid, reference_code text, category incident_category, status incident_status, distance_m double precision, created_at timestamptz)
 language sql stable security invoker set search_path = public as $$
@@ -855,7 +776,6 @@ language sql stable security invoker set search_path = public as $$
   limit 50
 $$;
 
--- Public ward-level aggregate (no personal data) — visible to every signed-in user
 create or replace function public.ward_risk_summary()
 returns table(ward_id text, name text, city_corporation text, lat double precision, lng double precision,
               population integer, risk_score numeric, risk_level risk_level, risk_updated_at timestamptz,
@@ -872,9 +792,6 @@ language sql stable security definer set search_path = public as $$
 $$;
 revoke execute on function public.ward_risk_summary() from anon;
 
--- =====================================================================
--- A08 analytics: indexed aggregates over live + large historical data
--- =====================================================================
 create or replace function public.analytics_dashboard(p_days integer default 30, p_ward text default null)
 returns jsonb
 language plpgsql stable security definer set search_path = public as $$
@@ -962,10 +879,6 @@ grant execute on function public.nearby_incidents(double precision,double precis
 grant execute on function public.ward_risk_summary() to authenticated;
 grant execute on function public.analytics_dashboard(integer,text) to authenticated;
 
--- ================= migrations/005_realtime.sql =================
--- =====================================================================
--- ResilioMesh — 005 Supabase Realtime publication
--- =====================================================================
 do $$
 declare t text;
 begin
@@ -975,24 +888,16 @@ begin
     begin
       execute format('alter publication supabase_realtime add table public.%I', t);
     exception
-      when duplicate_object then null;           -- already published
+      when duplicate_object then null;
       when undefined_object then
         raise notice 'publication supabase_realtime missing (not a Supabase DB?)';
     end;
   end loop;
 end $$;
 
--- full row images so UPDATE events carry the previous version for conflict UI
 alter table incidents replica identity full;
 alter table tasks replica identity full;
 alter table resources replica identity full;
-
--- ================= seed.sql =================
--- =====================================================================
--- ResilioMesh — reference seed data (run AFTER migrations 001-005)
--- Demo users + sample incidents are created by scripts/seed_demo.py
--- Organisation names are fictional demo entities.
--- =====================================================================
 
 insert into organizations (id, name, type, contact_phone) values
   ('11111111-1111-1111-1111-111111111101', 'North Dhaka Drainage Authority',  'city_authority', '+8801700000101'),
@@ -1002,8 +907,6 @@ insert into organizations (id, name, type, contact_phone) values
   ('11111111-1111-1111-1111-111111111105', 'ResilioMesh Platform Ops',        'system',         '+8801700000105')
 on conflict (id) do nothing;
 
--- Dhaka wards / localities (approximate centroids). Hydrological attributes
--- are modelled estimates for the demo (see README > Data & limitations).
 insert into wards (id, name, city_corporation, lat, lng, population, area_km2, elevation_m, impervious_pct, drainage_capacity_mm_hr, historical_events_10y) values
   ('DNCC-01','Uttara Sector 7',    'DNCC',23.8759,90.3795,182000, 4.10, 7.8, 71, 38, 14),
   ('DNCC-02','Mirpur 10',          'DNCC',23.8069,90.3687,265000, 3.20, 6.1, 86, 26, 41),
@@ -1027,7 +930,6 @@ insert into wards (id, name, city_corporation, lat, lng, population, area_km2, e
   ('DSCC-10','Kamrangirchar',      'DSCC',23.7130,90.3720,214000, 3.70, 3.9, 72, 16, 43)
 on conflict (id) do nothing;
 
--- Drainage assets
 insert into drainage_assets (code, name, asset_type, ward_id, owner_org_id, lat, lng, capacity_m3s, condition_score, status, last_maintained_at) values
   ('DR-MRP-001','Mirpur 10 Roundabout Box Culvert','culvert','DNCC-02','11111111-1111-1111-1111-111111111101',23.8072,90.3684,4.5,38,'blocked',  now()-interval '210 days'),
   ('DR-MRP-002','Begum Rokeya Sarani Storm Drain','drain','DNCC-02','11111111-1111-1111-1111-111111111101',23.8001,90.3702,2.2,55,'degraded',   now()-interval '120 days'),
@@ -1056,7 +958,6 @@ insert into drainage_assets (code, name, asset_type, ward_id, owner_org_id, lat,
   ('CN-KMR-001','Kamrangirchar Embankment Drain','canal','DSCC-10','11111111-1111-1111-1111-111111111102',23.7120,90.3700,5.0,27,'blocked',now()-interval '500 days')
 on conflict (code) do nothing;
 
--- Resource inventory (city authorities own pumps & crews, NGOs own relief)
 insert into resources (organization_id, resource_type, name, unit, quantity_total, quantity_available, base_ward_id, lat, lng) values
   ('11111111-1111-1111-1111-111111111101','pump','North Mobile Dewatering Pumps (6")','pump',8,8,'DNCC-05',23.7602,90.3990),
   ('11111111-1111-1111-1111-111111111101','pump','Mirpur Depot Portable Pumps','pump',4,4,'DNCC-02',23.8050,90.3690),
@@ -1073,11 +974,6 @@ insert into resources (organization_id, resource_type, name, unit, quantity_tota
   ('11111111-1111-1111-1111-111111111104','medical_kit','First-Aid Kit','kit',150,150,'DNCC-07',23.7806,90.4265)
 on conflict (organization_id, name) do nothing;
 
--- ---------------------------------------------------------------------
--- Historical flood events: ~10 years x 20 wards, deterministic synthetic
--- record generated from ward vulnerability + monsoon seasonality.
--- (~12-18k rows; /api/analytics/import can load 100k+ more for A08.)
--- ---------------------------------------------------------------------
 select setseed(0.42);
 insert into historical_flood_events (ward_id, event_date, rainfall_mm, max_depth_cm, duration_hr, households_affected, source, record_hash)
 select w.id, d::date,
@@ -1098,7 +994,6 @@ cross join lateral (
 where rain > w.drainage_capacity_mm_hr * 1.15
 on conflict (record_hash) do nothing;
 
--- initial ward risk baseline (refreshed by backend /api/risk/wards/refresh)
 update wards set
   current_risk_score = least(95, round((historical_events_10y * 1.1 + (100 - drainage_capacity_mm_hr) * 0.35 + impervious_pct * 0.15)::numeric, 1)),
   risk_updated_at = now();
@@ -1107,17 +1002,6 @@ update wards set current_risk_level = case
   when current_risk_score >= 55 then 'high'::risk_level
   when current_risk_score >= 35 then 'moderate'::risk_level
   else 'low'::risk_level end;
-
--- ================= migrations/006_role_requests.sql =================
--- =====================================================================
--- ResilioMesh — 006 role-based registration (staff access requests)
--- ---------------------------------------------------------------------
--- Every self-registered account still starts as 'citizen' (no privilege
--- escalation). If the sign-up form asked for a staff role, a pending
--- role_request is filed with the role-specific details; an admin approves
--- it from Admin → Access requests, which then grants the role + org.
--- Admin accounts can never be requested from the public form.
--- =====================================================================
 
 create table if not exists role_requests (
   id                uuid primary key default gen_random_uuid(),
@@ -1144,14 +1028,11 @@ grant select on role_requests to authenticated;
 drop policy if exists role_requests_read on role_requests;
 create policy role_requests_read on role_requests for select to authenticated
   using (user_id = auth.uid() or rm_role() = 'admin');
--- no insert/update/delete policies: rows are created by the sign-up trigger and
--- changed only through rm_review_role_request() below.
 
 drop trigger if exists trg_audit_role_requests on role_requests;
 create trigger trg_audit_role_requests after insert or update or delete on role_requests
   for each row execute function rm_audit();
 
--- Public (anon) list of organisations for the sign-up form: id / name / type only.
 create or replace function public.rm_public_organizations()
 returns table (id uuid, name text, type org_type)
 language sql stable security definer set search_path = public as $$
@@ -1159,7 +1040,6 @@ language sql stable security definer set search_path = public as $$
 $$;
 grant execute on function public.rm_public_organizations() to anon, authenticated;
 
--- ---------- New auth user -> citizen profile (+ optional role request) ----
 create or replace function public.handle_new_user() returns trigger
 language plpgsql security definer set search_path = public as $$
 declare
@@ -1179,7 +1059,7 @@ begin
     coalesce(nullif(trim(m->>'full_name'), ''), split_part(new.email, '@', 1)),
     new.email,
     nullif(m->>'phone', ''),
-    'citizen',                      -- always citizen; staff roles need admin approval
+    'citizen',
     v_ward
   )
   on conflict (id) do nothing;
@@ -1206,7 +1086,7 @@ begin
         v_ward
       );
     exception when check_violation or unique_violation then
-      null;   -- malformed staff details must never block account creation (profile is kept)
+      null;
     end;
   end if;
   return new;
@@ -1216,7 +1096,6 @@ drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created after insert on auth.users
   for each row execute function public.handle_new_user();
 
--- ---------- Admin review --------------------------------------------
 create or replace function public.rm_review_role_request(
   p_id uuid, p_approve boolean, p_org_id uuid default null, p_note text default null)
 returns role_requests
@@ -1252,28 +1131,14 @@ begin
 end $$;
 grant execute on function public.rm_review_role_request(uuid, boolean, uuid, text) to authenticated;
 
--- realtime: the requester's login screen / admin queue update live
 do $$ begin
   alter publication supabase_realtime add table role_requests;
 exception when others then null; end $$;
-
--- ================= migrations/007_staff_login_ids.sql =================
--- =====================================================================
--- ResilioMesh — 007 role-specific sign-in identifiers
--- ---------------------------------------------------------------------
--- Staff sign in with email + password + their role identifier:
---   City Officer → Employee ID · Field Worker → Staff ID · Admin → Admin ID
---   NGO Coordinator → their NGO (profiles.organization_id)
--- The identifier lives on the profile, is set when an admin approves an
--- access request (or by an admin directly) and cannot be self-edited.
--- Run after 006_role_requests.sql.
--- =====================================================================
 
 alter table profiles add column if not exists employee_id text
   check (employee_id is null or employee_id ~ '^[A-Za-z0-9/-]{3,30}$');
 create unique index if not exists uq_profiles_employee_id on profiles (upper(employee_id)) where employee_id is not null;
 
--- Only admins (or the backend/system) may change role / org / active flag / staff ID.
 create or replace function public.rm_guard_profile() returns trigger
 language plpgsql security definer set search_path = public as $$
 begin
@@ -1292,7 +1157,6 @@ begin
   return new;
 end $$;
 
--- Approving an access request now also copies the Employee / Staff ID to the profile.
 create or replace function public.rm_review_role_request(
   p_id uuid, p_approve boolean, p_org_id uuid default null, p_note text default null)
 returns role_requests
@@ -1333,7 +1197,6 @@ begin
 end $$;
 grant execute on function public.rm_review_role_request(uuid, boolean, uuid, text) to authenticated;
 
--- Demo accounts (judges): give every staff account its sign-in ID.
 update profiles p set employee_id = d.eid
 from (values
   ('admin@resiliomesh.demo',    'ADM-001'),
@@ -1345,44 +1208,13 @@ from (values
 ) as d(email, eid)
 where p.email = d.email and p.employee_id is null;
 
--- ================= migrations/008_identity_verification.sql =================
--- =====================================================================
--- ResilioMesh — 008 identity verification & anti-impersonation
--- ---------------------------------------------------------------------
--- Closes the gaps in the staff / citizen identity model:
---   1. Staff ID was only checked in the browser
---        → staff privileges are bound to a server-verified session.
---          A password-only session (e.g. straight to the Supabase API) gets
---          citizen-level access until rm_verify_staff_login() accepts the
---          Employee / Staff / Admin ID (or the NGO), and — when the account
---          has an authenticator app or its role requires one — until the
---          session reaches AAL2 (TOTP).
---   2. Official e-mail domains   → organizations.email_domains, enforced on
---                                  sign-up and again on approval
---   3. Employee ID roster         → staff_roster + live "Verified / flag" check
---   4. NGOAB registration         → ngo_registry + live check
---   5. ID card / appointment letter → private storage bucket + documents table
---   6. Single-admin approval      → role_request_approvals, two different
---                                  admins for sensitive / flagged requests;
---                                  admins can no longer promote directly
---   7. Phone                      → Bangladeshi mobiles only (+8801XXXXXXXXX),
---                                  OTP-verified flag synced from auth.users
---   8. Citizen country / GPS spoofing → Dhaka service area, location ↔ ward
---                                  check, per-citizen rate limits, trust flags
---                                  (foreign / Tor network, outside home area)
--- Tunables live in security_settings (one row, editable only from the SQL
--- editor / service connection, never from the browser).
--- Run after 007_staff_login_ids.sql. Re-runnable.
--- =====================================================================
-
--- ---------- 0. Security settings -------------------------------------
 create table if not exists security_settings (
   id                          boolean primary key default true check (id),
   staff_session_hours         integer not null default 12 check (staff_session_hours between 1 and 168),
   staff_id_max_failures       integer not null default 5  check (staff_id_max_failures between 3 and 20),
   staff_id_lock_minutes       integer not null default 15 check (staff_id_lock_minutes between 1 and 1440),
   mfa_required_roles          app_role[] not null default '{}',
-  require_phone_verification  boolean not null default false,   -- turn on once an SMS provider is configured
+  require_phone_verification  boolean not null default false,
   require_official_email      boolean not null default true,
   require_email_confirmed     boolean not null default true,
   require_documents           boolean not null default true,
@@ -1395,7 +1227,7 @@ create table if not exists security_settings (
   updated_at                  timestamptz not null default now()
 );
 insert into security_settings (id) values (true) on conflict (id) do nothing;
-alter table security_settings enable row level security;   -- no policies: browser can neither read nor write it
+alter table security_settings enable row level security;
 revoke all on security_settings from anon, authenticated;
 
 drop trigger if exists trg_touch_security_settings on security_settings;
@@ -1405,7 +1237,6 @@ drop trigger if exists trg_audit_security_settings on security_settings;
 create trigger trg_audit_security_settings after insert or update or delete on security_settings
   for each row execute function rm_audit();
 
--- Non-sensitive switches the UI needs (which steps to show).
 create or replace function public.rm_public_security_settings() returns jsonb
 language sql stable security definer set search_path = public as $$
   select jsonb_build_object(
@@ -1421,8 +1252,6 @@ language sql stable security definer set search_path = public as $$
 $$;
 grant execute on function public.rm_public_security_settings() to anon, authenticated;
 
--- ---------- 1. Small helpers -----------------------------------------
--- Bangladeshi mobile → E.164 (+8801XXXXXXXXX). NULL when it is not one.
 create or replace function public.rm_normalize_bd_phone(p text) returns text
 language sql immutable as $$
   select case
@@ -1449,7 +1278,6 @@ language sql immutable as $$
     'temp-mail.org','10minutemail.com','yopmail.com','sharklasers.com'])
 $$;
 
--- domain equals an allowed domain or is a sub-domain of it
 create or replace function public.rm_domain_matches(p_domain text, p_allowed text[]) returns boolean
 language sql immutable as $$
   select p_domain is not null and exists (
@@ -1457,8 +1285,6 @@ language sql immutable as $$
     where p_domain = lower(a) or p_domain like '%.' || lower(a))
 $$;
 
--- Session id / assurance level of the calling JWT (PostgREST & Realtime set request.jwt.claims).
--- (plain SQL, no exception block: this runs inside every RLS check)
 create or replace function public.rm_jwt_claims() returns jsonb
 language sql stable as $$
   select coalesce(nullif(current_setting('request.jwt.claims', true), '')::jsonb, '{}'::jsonb)
@@ -1475,9 +1301,6 @@ language sql stable as $$
   select coalesce(nullif(rm_jwt_claims()->>'aal', ''), 'aal1')
 $$;
 
--- Country of the HTTP caller as reported by the CDN in front of Supabase
--- (Cloudflare overwrites cf-ipcountry on ingress, so clients cannot forge it).
--- NULL when not available. 'T1' = Tor exit node.
 create or replace function public.rm_request_country() returns text
 language plpgsql stable as $$
 declare h jsonb;
@@ -1487,9 +1310,6 @@ begin
 exception when others then return null;
 end $$;
 
--- MFA factor / live-session lookups. auth.* is managed by Supabase; if this
--- role cannot read it, the helpers degrade gracefully (MFA still enforced for
--- the roles listed in security_settings.mfa_required_roles via the JWT aal).
 do $$
 begin
   if to_regclass('auth.mfa_factors') is not null and has_table_privilege('auth.mfa_factors', 'select') then
@@ -1517,11 +1337,9 @@ begin
   end if;
 end $$;
 
--- ---------- 2. Profiles: verified phone / e-mail, BD-only phones ------
 alter table profiles add column if not exists phone_verified_at timestamptz;
 alter table profiles add column if not exists email_verified_at timestamptz;
 
--- existing data: normalise to +880…, drop anything that is not a BD mobile
 update profiles set phone = rm_normalize_bd_phone(phone)
  where phone is not null and phone is distinct from rm_normalize_bd_phone(phone);
 alter table profiles drop constraint if exists profiles_phone_check;
@@ -1536,7 +1354,6 @@ alter table community_needs drop constraint if exists chk_needs_phone_bd;
 alter table community_needs add constraint chk_needs_phone_bd
   check (contact_phone is null or contact_phone ~ '^\+8801[3-9][0-9]{8}$');
 
--- normalise on the way in, with a readable error for foreign / malformed numbers
 create or replace function public.rm_profile_normalize() returns trigger
 language plpgsql as $$
 declare v text;
@@ -1551,13 +1368,11 @@ begin
   end if;
   return new;
 end $$;
--- name sorts before trg_guard_profile so the guard compares normalised numbers
 drop trigger if exists trg_profile_normalize on profiles;
 drop trigger if exists trg_aa_profile_normalize on profiles;
 create trigger trg_aa_profile_normalize before insert or update of phone on profiles
   for each row execute function rm_profile_normalize();
 
--- backfill verification timestamps from auth.users (system context: allowed by the guard)
 do $$
 begin
   execute $q$
@@ -1575,10 +1390,6 @@ exception when undefined_column or insufficient_privilege then
   raise notice 'auth.users verification columns not readable — skipping backfill';
 end $$;
 
--- Only admins (or the backend/system) may change role / org / active flag / staff ID.
--- Privilege GRANTS (promotion, org or staff-ID change of a staff account,
--- re-activating a staff account) must go through the two-person request flow.
--- Verification timestamps and e-mail are owned by Supabase Auth (synced by trigger).
 create or replace function public.rm_guard_profile() returns trigger
 language plpgsql security definer set search_path = public as $$
 declare v_grant boolean := coalesce(current_setting('rm.role_grant', true), 'off') = 'on';
@@ -1591,10 +1402,9 @@ begin
          and new.phone is not distinct from old.phone) then
     raise exception 'FORBIDDEN: e-mail and verification status are managed by sign-in, not editable' using errcode = '42501';
   end if;
-  -- a changed number is unverified until the OTP for it is confirmed
   if new.phone is distinct from old.phone then new.phone_verified_at := null; end if;
 
-  if v_grant then return new; end if;     -- inside rm_review_role_request (two-person approved)
+  if v_grant then return new; end if;
 
   if (new.role is distinct from old.role
       or new.organization_id is distinct from old.organization_id
@@ -1625,7 +1435,6 @@ begin
   return new;
 end $$;
 
--- ---------- 3. Effective role: staff privileges need a verified session ----
 create table if not exists staff_sessions (
   session_id      uuid primary key,
   user_id         uuid not null references profiles(id) on delete cascade,
@@ -1664,7 +1473,6 @@ begin
   if v_role is null or not v_active then return null; end if;
   if v_role = 'citizen' then return 'citizen'; end if;
 
-  -- staff: this exact session must have passed the server-side staff-ID check
   if p_session is null or not exists (
        select 1 from staff_sessions s
         where s.session_id = p_session and s.user_id = p_uid and s.role = v_role
@@ -1673,7 +1481,6 @@ begin
     return 'citizen';
   end if;
 
-  -- second factor: required when the account has an authenticator or the role demands one
   if coalesce(p_aal, 'aal1') <> 'aal2' then
     select mfa_required_roles into v_mfa_roles from security_settings where id;
     if v_role = any(coalesce(v_mfa_roles, '{}')) or rm_mfa_enrolled(p_uid) then
@@ -1707,8 +1514,6 @@ drop policy if exists staff_attempts_read on staff_login_attempts;
 create policy staff_attempts_read on staff_login_attempts for select to authenticated
   using (user_id = auth.uid() or rm_role() = 'admin');
 
--- Second sign-in step for staff. Returns JSON (never raises on a wrong ID) so
--- the failed attempt is committed and counts towards the lock-out.
 create or replace function public.rm_verify_staff_login(
   p_role app_role, p_staff_id text default null, p_org_id uuid default null)
 returns jsonb
@@ -1734,7 +1539,6 @@ begin
     return jsonb_build_object('ok', false, 'code', 'ROLE_MISMATCH', 'actual_role', p.role);
   end if;
 
-  -- lock-out after repeated wrong IDs (per account, sliding window)
   select count(*), max(created_at) into v_fails, v_until from staff_login_attempts
    where user_id = v_uid and not succeeded and reason in ('ID_MISMATCH','ORG_MISMATCH')
      and created_at > now() - make_interval(mins => s.staff_id_lock_minutes)
@@ -1751,7 +1555,7 @@ begin
       v_ok := upper(btrim(p.employee_id)) = upper(btrim(coalesce(p_staff_id, '')));
       if not v_ok then v_reason := 'ID_MISMATCH'; end if;
     end if;
-  else  -- ngo_coordinator: the NGO is the second identifier
+  else
     v_ok := p.organization_id is not null and p.organization_id = p_org_id;
     if not v_ok then v_reason := 'ORG_MISMATCH'; end if;
   end if;
@@ -1771,7 +1575,7 @@ begin
   on conflict (session_id) do update
      set role = excluded.role, organization_id = excluded.organization_id, verified_at = now(),
          expires_at = excluded.expires_at, request_country = excluded.request_country
-   where staff_sessions.user_id = excluded.user_id;          -- a session id can never be re-bound to another user
+   where staff_sessions.user_id = excluded.user_id;
   get diagnostics v_n = row_count;
   if v_n = 0 then return jsonb_build_object('ok', false, 'code', 'SESSION_INVALID'); end if;
 
@@ -1788,7 +1592,6 @@ language sql volatile security definer set search_path = public as $$
 $$;
 grant execute on function public.rm_end_staff_session() to authenticated;
 
--- What the UI needs to decide which verification step to show.
 create or replace function public.rm_session_status() returns jsonb
 language plpgsql stable security definer set search_path = public as $$
 declare
@@ -1818,7 +1621,6 @@ begin
 end $$;
 grant execute on function public.rm_session_status() to authenticated;
 
--- ---------- 4. Organisations: official domains, NGOAB number -----------
 alter table organizations add column if not exists email_domains text[] not null default '{}';
 alter table organizations add column if not exists ngoab_registration_no text;
 
@@ -1848,7 +1650,6 @@ update organizations set email_domains = '{dncc.gov.bd}'
 update organizations set email_domains = '{dscc.gov.bd}'
  where id = '11111111-1111-1111-1111-111111111102' and email_domains = '{}';
 
--- public org list for the sign-up / sign-in forms now includes official domains
 drop function if exists public.rm_public_organizations();
 create function public.rm_public_organizations()
 returns table (id uuid, name text, type org_type, email_domains text[])
@@ -1858,7 +1659,6 @@ language sql stable security definer set search_path = public as $$
 $$;
 grant execute on function public.rm_public_organizations() to anon, authenticated;
 
--- ---------- 5. Official registries: staff roster, NGOAB list ------------
 create table if not exists staff_roster (
   id              uuid primary key default gen_random_uuid(),
   organization_id uuid not null references organizations(id) on delete cascade,
@@ -1928,8 +1728,6 @@ drop trigger if exists trg_audit_ngo_registry on ngo_registry;
 create trigger trg_audit_ngo_registry after insert or update or delete on ngo_registry
   for each row execute function rm_audit();
 
--- Bulk import (CSV parsed in the browser). p_replace deactivates roster rows
--- of this organisation that are not in the new file (kept for the audit trail).
 create or replace function public.rm_import_staff_roster(p_org uuid, p_rows jsonb, p_replace boolean default false)
 returns jsonb
 language plpgsql volatile security definer set search_path = public as $$
@@ -2015,7 +1813,6 @@ begin
 end $$;
 grant execute on function public.rm_import_ngo_registry(jsonb) to authenticated;
 
--- demo registry rows (fictional organisations from seed.sql)
 insert into ngo_registry(registration_no, name, district, status)
 select v.reg, v.name, 'Dhaka', 'active'
   from (values ('DEMO-0103', 'Shobar Jonno Relief Network'), ('DEMO-0104', 'Nodi Humanitarian Foundation')) v(reg, name)
@@ -2040,7 +1837,6 @@ select o.id, v.emp, v.mail, v.name, v.role::app_role
  where not exists (select 1 from staff_roster s where s.organization_id = v.org
                      and (upper(s.employee_id) = v.emp or lower(s.official_email) = v.mail));
 
--- ---------- 6. Role requests: checks, documents, two-person approval -----
 alter table role_requests add column if not exists email text;
 alter table role_requests add column if not exists source text not null default 'self';
 alter table role_requests add column if not exists requested_by uuid references profiles(id) on delete set null;
@@ -2107,7 +1903,6 @@ begin
   if (select count(*) from role_request_documents where request_id = new.request_id) >= 10 then
     raise exception 'VALIDATION: at most 10 documents per request' using errcode = '23514';
   end if;
-  -- the file must really exist in the private bucket (when Supabase Storage is present)
   if to_regclass('storage.objects') is not null then
     execute 'select exists (select 1 from storage.objects where bucket_id = $1 and name = $2)'
       into v_found using 'staff-documents', new.storage_path;
@@ -2131,7 +1926,6 @@ drop policy if exists rrd_delete on role_request_documents;
 create policy rrd_delete on role_request_documents for delete to authenticated
   using (user_id = auth.uid() and exists (select 1 from role_requests r where r.id = request_id and r.status = 'pending'));
 
--- Private bucket for ID cards / appointment letters (Supabase Storage only).
 do $$
 begin
   if to_regclass('storage.buckets') is null then
@@ -2161,7 +1955,6 @@ exception when insufficient_privilege then
   raise notice 'no permission on storage schema — create bucket "staff-documents" (private) and its policies in the dashboard';
 end $$;
 
--- Live verification of one request (roster may be uploaded after the request).
 create or replace function public.rm_request_checks(r role_requests, p_org uuid default null, p_reviewer uuid default null)
 returns jsonb
 language plpgsql stable security definer set search_path = public as $$
@@ -2180,7 +1973,6 @@ begin
   v_domain  := rm_email_domain(v_email);
   v_mail_ok := p.email_verified_at is not null;
 
-  -- e-mail domain
   if o.id is not null and cardinality(o.email_domains) > 0 and rm_domain_matches(v_domain, o.email_domains) then
     v_dstatus := 'official';
   elsif o.id is null and r.requested_role = 'city_officer' and exists (
@@ -2197,7 +1989,6 @@ begin
     v_email_ok := false; v_email_msg := 'NGO coordinators must use an organisation e-mail, not a public mail provider';
   end if;
 
-  -- staff roster
   v_emp := nullif(upper(btrim(coalesce(r.employee_id, p.employee_id))), '');
   if r.requested_role <> 'admin' then
     if v_emp is not null then
@@ -2217,7 +2008,6 @@ begin
     v_roster_by := rr.uploaded_by;
   end if;
 
-  -- NGOAB registration
   if r.requested_role = 'ngo_coordinator' then
     v_reg := nullif(upper(btrim(coalesce(r.registration_no, o.ngoab_registration_no))), '');
     if v_reg is null then v_ngo := 'missing';
@@ -2235,7 +2025,6 @@ begin
   end if;
   select count(*) into v_docs from role_request_documents d where d.request_id = r.id;
 
-  -- red flags: allowed only with two approvals and a written note
   if v_dstatus <> 'official' and r.requested_role <> 'admin' then flags := array_append(flags, 'email_domain'); end if;
   if v_roster not in ('verified','id_only','n/a') then flags := array_append(flags, 'roster'); end if;
   if v_ngo not in ('verified','n/a') then flags := array_append(flags, 'ngoab'); end if;
@@ -2246,7 +2035,6 @@ begin
     flags := array_append(flags, 'ngoab_uploaded_by_reviewer');
   end if;
 
-  -- hard blockers
   if r.requested_role <> 'admin' and v_org is null then blockers := array_append(blockers, 'organisation_missing'); end if;
   if o.id is not null and not (
        (r.requested_role = 'city_officer'    and o.type = 'city_authority') or
@@ -2281,7 +2069,6 @@ begin
 end $$;
 revoke execute on function public.rm_request_checks(role_requests, uuid, uuid) from anon, authenticated, public;
 
--- PostgREST computed column: select=*,verification  (admins only)
 create or replace function public.verification(r role_requests) returns jsonb
 language plpgsql stable security definer set search_path = public as $$
 begin
@@ -2290,7 +2077,6 @@ begin
 end $$;
 grant execute on function public.verification(role_requests) to authenticated;
 
--- ---------- 7. Sign-up trigger: official domain, BD phone, snapshot -----
 create or replace function public.handle_new_user() returns trigger
 language plpgsql security definer set search_path = public as $$
 declare
@@ -2307,8 +2093,8 @@ begin
     coalesce(nullif(left(trim(m->>'full_name'), 100), ''), split_part(new.email, '@', 1)),
     new.email,
     coalesce(case when new.phone_confirmed_at is not null then rm_normalize_bd_phone(new.phone) end,
-             rm_normalize_bd_phone(m->>'phone')),        -- non-BD numbers are dropped, never stored
-    'citizen',                                            -- always citizen; staff roles need admin approval
+             rm_normalize_bd_phone(m->>'phone')),
+    'citizen',
     v_ward,
     new.email_confirmed_at,
     case when new.phone_confirmed_at is not null and rm_normalize_bd_phone(new.phone) is not null then new.phone_confirmed_at end
@@ -2324,7 +2110,6 @@ begin
     select * into o from organizations where id = v_org;
     if o.id is null then v_org := null; end if;
 
-    -- official e-mail domain is enforced at sign-up: the account is not created at all
     v_dom := rm_email_domain(new.email);
     if s.require_official_email then
       if v_role = 'city_officer' and not (
@@ -2356,7 +2141,7 @@ begin
         v_ward
       );
     exception when check_violation or unique_violation then
-      null;   -- malformed staff details must never block a citizen account (profile is kept)
+      null;
     end;
   end if;
   return new;
@@ -2366,7 +2151,6 @@ drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created after insert on auth.users
   for each row execute function public.handle_new_user();
 
--- auth.users → profiles: e-mail, confirmed e-mail, OTP-verified phone
 create or replace function public.rm_sync_auth_user() returns trigger
 language plpgsql security definer set search_path = public as $$
 declare v_phone text := rm_normalize_bd_phone(new.phone);
@@ -2385,7 +2169,6 @@ drop trigger if exists on_auth_user_updated on auth.users;
 create trigger on_auth_user_updated after update of email, email_confirmed_at, phone, phone_confirmed_at on auth.users
   for each row execute function public.rm_sync_auth_user();
 
--- ---------- 8. Review: two different admins for sensitive / flagged ------
 drop function if exists public.rm_review_role_request(uuid, boolean, uuid, text);
 create function public.rm_review_role_request(
   p_id uuid, p_approve boolean, p_org_id uuid default null, p_note text default null)
@@ -2407,7 +2190,6 @@ begin
     raise exception 'FORBIDDEN: you cannot review your own access request' using errcode = '42501';
   end if;
 
-  -- any single admin may refuse (fail-safe)
   if not p_approve then
     if v_note is null or char_length(v_note) < 3 then
       raise exception 'VALIDATION: give the applicant a short reason' using errcode = '23514';
@@ -2425,7 +2207,6 @@ begin
     raise exception 'CONFLICT: you proposed this change — a different admin must approve it' using errcode = '40001';
   end if;
 
-  -- the organisation is fixed by the first approver; later approvers confirm the same one
   v_org := coalesce(p_org_id, r.organization_id);
   if exists (select 1 from role_request_approvals where request_id = p_id)
      and r.organization_id is distinct from v_org then
@@ -2463,7 +2244,7 @@ begin
          is_active = true
    where id = r.user_id;
   perform set_config('rm.role_grant', 'off', true);
-  delete from staff_sessions where user_id = r.user_id;      -- the new role needs a fresh staff sign-in
+  delete from staff_sessions where user_id = r.user_id;
 
   update role_requests
      set status = 'approved', organization_id = v_org, required_approvals = v_required,
@@ -2473,8 +2254,6 @@ begin
 end $$;
 grant execute on function public.rm_review_role_request(uuid, boolean, uuid, text) to authenticated;
 
--- An admin who wants to grant / change staff access files a request that a
--- DIFFERENT admin must approve (the proposer counts as the first approval).
 create or replace function public.rm_admin_propose_role_change(
   p_user uuid, p_role app_role, p_org_id uuid default null, p_employee_id text default null, p_note text default null)
 returns jsonb
@@ -2511,7 +2290,6 @@ begin
 end $$;
 grant execute on function public.rm_admin_propose_role_change(uuid, app_role, uuid, text, text) to authenticated;
 
--- ---------- 9. Reports: service area, location ↔ ward, rate limit, flags --
 alter table incidents add column if not exists trust_flags text[] not null default '{}';
 alter table incidents add column if not exists reporter_country text;
 
@@ -2527,7 +2305,6 @@ declare
   v_pt geography; v_km double precision; v_ward_name text; v_nearest text; v_home_km double precision;
   v_country text; n_hour int; n_day int; v_flags text[] := '{}';
 begin
-  -- clients can never forge reporter, status, AI or trust fields
   if not rm_is_system() then
     new.reporter_id := auth.uid();
     new.status := 'reported';
@@ -2562,7 +2339,6 @@ begin
       if p.created_at > now() - interval '24 hours' then v_flags := array_append(v_flags, 'new_account'); end if;
     end if;
 
-    -- the pin must belong to the chosen ward (nearest ward centroid wins)
     v_pt := st_setsrid(st_makepoint(new.lng, new.lat), 4326)::geography;
     select st_distance(location, v_pt) / 1000.0, name into v_km, v_ward_name from wards where id = new.ward_id;
     select id into v_nearest from wards order by st_distance(location, v_pt) limit 1;
@@ -2586,7 +2362,6 @@ begin
     new.trust_flags := v_flags;
   end if;
 
-  -- Geospatial duplicate detection: same category within 150 m in the last 6 h
   select i.id into v_dup
   from incidents i
   where i.category = new.category
@@ -2626,7 +2401,6 @@ begin
     if (new.lat is distinct from old.lat or new.lng is distinct from old.lng) and not rm_in_dhaka(new.lat, new.lng) then
       raise exception 'VALIDATION: the location must be inside the Dhaka service area' using errcode = '23514';
     end if;
-    -- citizens may only edit text of their own report while it is still 'reported'
     if coalesce(rm_role()::text, 'citizen') = 'citizen' then
       if old.status <> 'reported'
          or new.status is distinct from old.status
@@ -2643,7 +2417,6 @@ begin
   return new;
 end $$;
 
--- community needs: BD contact phone, citizen phone check + daily limit
 create or replace function public.rm_need_before_insert() returns trigger
 language plpgsql security definer set search_path = public as $$
 declare v_dup uuid; s security_settings; v_n int;
@@ -2692,34 +2465,10 @@ begin
   return new;
 end $$;
 
--- realtime for the admin queue (approvals) — optional
 do $$ begin
   alter publication supabase_realtime add table role_request_approvals;
 exception when others then null; end $$;
 
--- ================= migrations/009_officer_areas.sql =================
--- =====================================================================
--- ResilioMesh — 009 officer areas (Dhaka North / Dhaka South)
--- ---------------------------------------------------------------------
--- Dhaka has two city corporations: DNCC (Dhaka North) and DSCC (Dhaka South).
--- Every ward already belongs to one of them (wards.city_corporation).
--- Until now a Water Resilience Officer (role key `city_officer`) could verify, assess,
--- plan and resolve incidents anywhere in Dhaka. From this migration:
---
---   * organizations.city_corporation  = the area a drainage authority serves.
---   * An officer's area comes from their organisation (profile → org → area).
---     It is never stored on the profile, so moving an officer between areas
---     still goes through the two-admin access-change flow of migration 008.
---   * Officers can only change incidents, drainage assets, plans, tasks and
---     workflow runs in wards of their own area. They can still READ the whole
---     city (floods cross the North/South boundary).
---   * An officer whose organisation has no area can change nothing (fail-safe).
---   * Admins stay city-wide. NGO coordinators and field workers are unchanged.
---
--- Re-runnable. If you re-run 003_rls.sql or 004_rpc.sql, run this file again.
--- =====================================================================
-
--- ---------- 1. Area of each drainage authority -------------------------
 alter table organizations add column if not exists city_corporation text;
 alter table organizations drop constraint if exists organizations_area_check;
 alter table organizations add constraint organizations_area_check
@@ -2731,8 +2480,6 @@ update organizations set city_corporation = 'DNCC'
 update organizations set city_corporation = 'DSCC'
  where id = '11111111-1111-1111-1111-111111111102' and city_corporation is null;
 
--- Changing an authority's area would silently move all its officers, which
--- bypasses two-admin approval. Once set, only the trusted backend can change it.
 create or replace function public.rm_org_area_guard() returns trigger
 language plpgsql as $$
 begin
@@ -2747,19 +2494,16 @@ drop trigger if exists trg_org_area_guard on organizations;
 create trigger trg_org_area_guard before update on organizations
   for each row execute function rm_org_area_guard();
 
--- ---------- 2. Helpers ----------------------------------------------------
 create or replace function public.rm_area_label(p_area text) returns text
 language sql immutable as $$
   select case p_area when 'DNCC' then 'Dhaka North' when 'DSCC' then 'Dhaka South' else 'no area' end
 $$;
 
--- area of the signed-in staff member (null for citizens, admins without an authority, NGOs)
 create or replace function public.rm_area() returns text
 language sql stable security definer set search_path = public as $$
   select o.city_corporation from organizations o where o.id = rm_org()
 $$;
 
--- may the caller change things in this ward?
 create or replace function public.rm_can_manage_ward(p_ward text) returns boolean
 language sql stable security definer set search_path = public as $$
   select case rm_role()
@@ -2770,7 +2514,6 @@ language sql stable security definer set search_path = public as $$
          end
 $$;
 
--- raise a clear error when an officer acts outside their area (no-op for other roles)
 create or replace function public.rm_assert_officer_area(p_ward text) returns void
 language plpgsql stable security definer set search_path = public as $$
 declare v_ward_area text;
@@ -2786,7 +2529,6 @@ grant execute on function public.rm_area() to authenticated;
 grant execute on function public.rm_can_manage_ward(text) to authenticated;
 grant execute on function public.rm_assert_officer_area(text) to authenticated;
 
--- ---------- 3. Row Level Security -----------------------------------------
 drop policy if exists incidents_update on incidents;
 create policy incidents_update on incidents for update to authenticated
   using ((reporter_id = auth.uid() and status = 'reported') or rm_can_manage_ward(ward_id))
@@ -2803,7 +2545,6 @@ create policy assets_update on drainage_assets for update to authenticated
   with check (rm_role() = 'admin'
          or (rm_role() = 'city_officer' and owner_org_id = rm_org() and rm_can_manage_ward(ward_id)));
 
--- ---------- 4. RPCs (same as 004, plus the area check) --------------------
 create or replace function public.transition_incident(
   p_incident_id uuid, p_to incident_status, p_expected_version integer,
   p_note text default null, p_duplicate_of uuid default null
@@ -2822,7 +2563,6 @@ begin
     return jsonb_build_object('ok', false, 'conflict', true, 'current', to_jsonb(v_inc));
   end if;
 
-  -- role rules per target state
   if p_to in ('verified','rejected','duplicate','resolved','assessed') and v_role not in ('city_officer','admin') then
     raise exception 'FORBIDDEN: % cannot move an incident to %', v_role, p_to using errcode = '42501';
   end if;
@@ -2857,7 +2597,6 @@ begin
   return jsonb_build_object('ok', true, 'incident', to_jsonb(v_inc));
 end $$;
 
--- every incident of a plan must be in the officer's area
 create or replace function public.rm_assert_officer_plan(p_incident_ids uuid[]) returns void
 language plpgsql stable security definer set search_path = public as $$
 declare v_ward text;
@@ -2893,7 +2632,6 @@ begin
   if not found then raise exception 'NOT_FOUND: plan' using errcode = 'P0002'; end if;
   perform rm_assert_officer_plan(v_plan.incident_ids);
 
-  -- idempotent approve: second click returns the same run
   if v_plan.status in ('approved','executing','executed') then
     select * into v_run from workflow_runs where plan_id = p_plan_id;
     return jsonb_build_object('ok', true, 'replayed', true, 'run_id', v_run.id);
@@ -2921,7 +2659,6 @@ begin
   update allocation_plans set status = 'approved', approved_by = auth.uid(), approved_at = now()
   where id = p_plan_id;
 
-  -- supersede other pending plans touching the same incidents
   update allocation_plans set status = 'superseded'
   where id <> p_plan_id and status = 'pending_approval' and incident_ids && v_plan.incident_ids;
 
@@ -2968,7 +2705,6 @@ begin
   if v_run.status not in ('failed','compensated') then
     raise exception 'INVALID_STATE: only failed runs can be retried' using errcode = '23514';
   end if;
-  -- incidents were rolled back to 'assessed' by compensation; re-approve them
   perform set_config('rm.note', 'Workflow retry', true);
   update incidents i set status = 'approved'
     from allocation_plans p
@@ -3027,7 +2763,6 @@ begin
     completed_at = case when p_status = 'completed' then now() else completed_at end
   where id = p_task_id returning * into v_task;
 
-  -- all tasks of the incident completed -> resolve incident, return reusable equipment
   if p_status = 'completed' then
     select count(*) into v_open from tasks
      where incident_id = v_task.incident_id and status not in ('completed','cancelled');
@@ -3049,40 +2784,6 @@ begin
   return jsonb_build_object('ok', true, 'task', to_jsonb(v_task));
 end $$;
 
--- ================= migrations/010_one_ngo_per_coordinator.sql =================
--- =====================================================================
--- ResilioMesh — 010 one person, one NGO coordinator post
--- ---------------------------------------------------------------------
--- How areas and NGOs fit together:
---   * Water Resilience Officers are bound to Dhaka North (DNCC) or Dhaka South (DSCC)
---     through their authority (migration 009).
---   * NGO Coordinators and Field Workers are NOT split by area. They serve the
---     whole city, because relief follows the flood and not the corporation line.
---
--- This migration matches how NGOs normally staff their work: a coordinator is
--- employed by ONE NGO. The same person must not hold coordinator posts at two
--- NGOs, or two coordinator accounts at the same NGO.
---
---   * The person is identified by their Bangladeshi mobile number. SIMs are
---     NID-registered in Bangladesh, and staff sign-up already requires one
---     (an SMS code confirms it once an SMS provider is configured).
---   * While one account holds an active NGO Coordinator post, no other active
---     staff account may use the same mobile. That covers a second coordinator
---     post, or the same person also working as a field worker or officer
---     somewhere else.
---   * An NGO Coordinator request needs a mobile number on the account.
---   * Moving a coordinator to a different NGO is a TRANSFER (flag `ngo_transfer`).
---     It needs two admins and a written reason. A profile holds exactly one
---     organisation, so the old post ends when the new one starts.
---   * A trigger on profiles enforces all of this, backed by a partial unique
---     index. No path (approval, admin proposal, SQL editor, backend) can create
---     a second post.
---
--- Run after 009. Re-runnable. If you re-run 008, run this file again
--- (it replaces rm_request_checks from 008).
--- =====================================================================
-
--- ---------- 0. Earlier migrations must be in place ----------------------
 do $$
 declare missing text[] := '{}';
 begin
@@ -3101,10 +2802,6 @@ begin
   end if;
 end $$;
 
--- ---------- 1. Who else holds a post with this mobile? -------------------
--- Returns a short description of the conflicting post, or null.
--- VOLATILE on purpose: inside the trigger it must see rows committed by a
--- concurrent transaction after the advisory lock below was granted.
 create or replace function public.rm_ngo_seat_conflict(p_user uuid, p_role app_role, p_phone text)
 returns text
 language plpgsql volatile security definer set search_path = public as $$
@@ -3131,7 +2828,6 @@ begin
 end $$;
 revoke execute on function public.rm_ngo_seat_conflict(uuid, app_role, text) from anon, authenticated, public;
 
--- ---------- 2. Hard guarantee on profiles --------------------------------
 create or replace function public.rm_ngo_seat_guard() returns trigger
 language plpgsql security definer set search_path = public as $$
 declare v_msg text;
@@ -3144,26 +2840,21 @@ begin
      and new.is_active = old.is_active then
     return new;
   end if;
-  -- serialise concurrent grants for the same mobile
   perform pg_advisory_xact_lock(hashtextextended('rm_staff_phone:' || new.phone, 0));
   v_msg := rm_ngo_seat_conflict(new.id, new.role, new.phone);
   if v_msg is not null then
     if rm_is_system() or coalesce(rm_role()::text, '') = 'admin' then
       raise exception 'CONFLICT: %', v_msg using errcode = '23505';
     end if;
-    -- do not tell non-admins whose number it is
     raise exception 'CONFLICT: this mobile number is already registered to another staff account' using errcode = '23505';
   end if;
   return new;
 end $$;
 
--- named after trg_aa_profile_normalize (008) so the phone is already normalised
 drop trigger if exists trg_ngo_seat_guard on profiles;
 create trigger trg_ngo_seat_guard before insert or update of role, phone, is_active on profiles
   for each row execute function rm_ngo_seat_guard();
 
--- Backstop for two coordinator posts on one mobile. If old data already breaks
--- the rule, list it and skip the index (the trigger still blocks new cases).
 do $$
 declare d record; n int := 0;
 begin
@@ -3183,12 +2874,6 @@ begin
   end if;
 end $$;
 
--- ---------- 3. Access-request checks (008 + NGO post rules) ---------------
--- Same as 008 §6, plus:
---   blocker `ngo_seat_taken` : the mobile already holds a conflicting post
---   blocker `phone_missing`  : NGO Coordinator request without a mobile number
---   flag    `ngo_transfer`   : an active NGO Coordinator asks to move to another NGO
---   key     `ngo_seat`       : the conflict text, for the admin screen
 create or replace function public.rm_request_checks(r role_requests, p_org uuid default null, p_reviewer uuid default null)
 returns jsonb
 language plpgsql stable security definer set search_path = public as $$
@@ -3208,7 +2893,6 @@ begin
   v_domain  := rm_email_domain(v_email);
   v_mail_ok := p.email_verified_at is not null;
 
-  -- e-mail domain
   if o.id is not null and cardinality(o.email_domains) > 0 and rm_domain_matches(v_domain, o.email_domains) then
     v_dstatus := 'official';
   elsif o.id is null and r.requested_role = 'city_officer' and exists (
@@ -3225,7 +2909,6 @@ begin
     v_email_ok := false; v_email_msg := 'NGO coordinators must use an organisation e-mail, not a public mail provider';
   end if;
 
-  -- staff roster
   v_emp := nullif(upper(btrim(coalesce(r.employee_id, p.employee_id))), '');
   if r.requested_role <> 'admin' then
     if v_emp is not null then
@@ -3245,7 +2928,6 @@ begin
     v_roster_by := rr.uploaded_by;
   end if;
 
-  -- NGOAB registration
   if r.requested_role = 'ngo_coordinator' then
     v_reg := nullif(upper(btrim(coalesce(r.registration_no, o.ngoab_registration_no))), '');
     if v_reg is null then v_ngo := 'missing';
@@ -3263,14 +2945,12 @@ begin
   end if;
   select count(*) into v_docs from role_request_documents d where d.request_id = r.id;
 
-  -- one person, one NGO Coordinator post (010)
   v_seat := rm_ngo_seat_conflict(r.user_id, r.requested_role, p.phone);
   if r.requested_role = 'ngo_coordinator' and p.role = 'ngo_coordinator' and p.is_active
      and p.organization_id is not null and p.organization_id is distinct from v_org then
     select name into v_transfer_from from organizations where id = p.organization_id;
   end if;
 
-  -- red flags: allowed only with two approvals and a written note
   if v_dstatus <> 'official' and r.requested_role <> 'admin' then flags := array_append(flags, 'email_domain'); end if;
   if v_roster not in ('verified','id_only','n/a') then flags := array_append(flags, 'roster'); end if;
   if v_ngo not in ('verified','n/a') then flags := array_append(flags, 'ngoab'); end if;
@@ -3282,7 +2962,6 @@ begin
   end if;
   if v_transfer_from is not null then flags := array_append(flags, 'ngo_transfer'); end if;
 
-  -- hard blockers
   if r.requested_role <> 'admin' and v_org is null then blockers := array_append(blockers, 'organisation_missing'); end if;
   if o.id is not null and not (
        (r.requested_role = 'city_officer'    and o.type = 'city_authority') or
@@ -3321,35 +3000,12 @@ end $$;
 revoke execute on function public.rm_request_checks(role_requests, uuid, uuid) from anon, authenticated, public;
 
 
--- ================= migrations/011_officer_area_view.sql =================
--- =====================================================================
--- ResilioMesh — 011 officers SEE only their own area
--- ---------------------------------------------------------------------
--- Migration 009 limited what a Water Resilience Officer (role `city_officer`) may
--- CHANGE to their area (Dhaka North = DNCC, Dhaka South = DSCC) but let them
--- read the whole city. From this migration an officer also only SEES their
--- own area: wards, incidents (+ history, risk assessments), drainage assets,
--- community needs, resources, plans, allocations, tasks, workflow runs and
--- steps, historical flood events, and the two dashboard RPCs.
---
---   * An officer always sees their own reports and their own authority's
---     resources, wherever they are.
---   * An officer whose authority has no area sees nothing area-bound (fail-safe).
---   * Admins, NGO coordinators, field workers and citizens are unchanged.
---
--- Requires 009. Re-runnable. If you re-run 003_rls.sql or 004_rpc.sql,
--- run 009 and then this file again.
--- =====================================================================
-
--- ---------- 1. Helpers ----------------------------------------------------
--- May the caller SEE rows of this ward? true for every role except officers.
 create or replace function public.rm_sees_ward(p_ward text) returns boolean
 language sql stable security definer set search_path = public as $$
   select rm_role() is distinct from 'city_officer'
       or exists (select 1 from wards w where w.id = p_ward and w.city_corporation = rm_area())
 $$;
 
--- every incident of the list is in the caller's view (plans, workflow runs)
 create or replace function public.rm_sees_incidents(p_incident_ids uuid[]) returns boolean
 language sql stable security definer set search_path = public as $$
   select rm_role() is distinct from 'city_officer'
@@ -3389,7 +3045,6 @@ grant execute on function public.rm_sees_need(uuid) to authenticated;
 grant execute on function public.rm_sees_plan(uuid) to authenticated;
 grant execute on function public.rm_sees_run(uuid) to authenticated;
 
--- ---------- 2. Read policies ---------------------------------------------
 drop policy if exists wards_read on wards;
 create policy wards_read on wards for select to anon, authenticated
   using (rm_sees_ward(id));
@@ -3446,7 +3101,6 @@ drop policy if exists hfe_read on historical_flood_events;
 create policy hfe_read on historical_flood_events for select to authenticated
   using (rm_is_staff() and rm_sees_ward(ward_id));
 
--- ---------- 3. Dashboard RPCs (SECURITY DEFINER, so they filter themselves) --
 create or replace function public.ward_risk_summary()
 returns table(ward_id text, name text, city_corporation text, lat double precision, lng double precision,
               population integer, risk_score numeric, risk_level risk_level, risk_updated_at timestamptz,
@@ -3478,7 +3132,7 @@ begin
   end if;
   v_from := now() - make_interval(days => p_days);
 
-  with vw as (                       -- wards the caller may see (officers: own area only)
+  with vw as (
     select * from wards where rm_sees_ward(id) and (p_ward is null or id = p_ward)
   ), inc as (
     select * from incidents
@@ -3548,41 +3202,15 @@ end $$;
 grant execute on function public.analytics_dashboard(integer,text) to authenticated;
 
 
--- ================= migrations/012_area_bound_staff.sql =================
--- =====================================================================
--- ResilioMesh — 012 North / South everywhere (area-bound staff)
--- ---------------------------------------------------------------------
--- 011 limited what Water Resilience Officers SEE to their area. This migration makes
--- the North / South split consistent across the whole project:
---
---   * "Area-bound" staff = people of a city corporation:
---       - Water Resilience Officers (always; an officer whose authority has no area
---         sees nothing area-bound — fail-safe), and
---       - Field Workers of Dhaka North / Dhaka South City Corporation.
---     NGO field workers, NGO coordinators, admins and citizens stay city-wide.
---   * Area-bound staff see only their area (every read policy of 011 and the
---     dashboard RPCs, plus the per-ward weather cache).
---   * Area-bound staff can only file reports and log community needs in their
---     area. A place belongs to the area of its nearest ward centre — the same
---     rule that already decides a report's ward (migration 008).
---   * ward_areas(): public ward centres + area, so maps can shade the other
---     city corporation as "not your area". No risk, report or people data.
---
--- Requires 009 and 011. Re-runnable. If you re-run 011, run this file again.
--- =====================================================================
-
--- ---------- 1. Who is bound to an area -----------------------------------
--- null = city-wide; 'DNCC' / 'DSCC' = only that area; '-' = nothing (officer without area)
 create or replace function public.rm_view_area() returns text
 language sql stable security definer set search_path = public as $$
   select case rm_role()
            when 'city_officer' then coalesce(rm_area(), '-')
-           when 'field_worker' then rm_area()        -- authority crews: their area; NGO crews: null
+           when 'field_worker' then rm_area()
          end
 $$;
 grant execute on function public.rm_view_area() to authenticated;
 
--- area of a point = area of the nearest ward centre (same rule as report → ward in 008)
 create or replace function public.rm_area_at(p_lat double precision, p_lng double precision) returns text
 language sql stable security definer set search_path = public as $$
   select city_corporation from wards
@@ -3591,7 +3219,6 @@ language sql stable security definer set search_path = public as $$
 $$;
 grant execute on function public.rm_area_at(double precision, double precision) to anon, authenticated;
 
--- ---------- 2. Visibility helpers (same names as 011, now for all area-bound staff)
 create or replace function public.rm_sees_ward(p_ward text) returns boolean
 language sql stable security definer set search_path = public as $$
   select rm_view_area() is null
@@ -3630,12 +3257,10 @@ language sql stable security definer set search_path = public as $$
       or exists (select 1 from workflow_runs r where r.id = p_run_id and rm_sees_plan(r.plan_id))
 $$;
 
--- ---------- 3. Policies not covered by 011 --------------------------------
 drop policy if exists weather_read on weather_cache;
 create policy weather_read on weather_cache for select to authenticated
   using (rm_sees_ward(ward_id));
 
--- ---------- 4. Area-bound staff report / log needs only in their area ----
 create or replace function public.rm_area_write_guard() returns trigger
 language plpgsql security definer set search_path = public as $$
 declare v_area text := rm_view_area(); v_ward_area text; v_pin_area text;
@@ -3658,7 +3283,6 @@ drop trigger if exists trg_need_area_guard on community_needs;
 create trigger trg_need_area_guard before insert on community_needs
   for each row execute function rm_area_write_guard();
 
--- ---------- 5. Public ward centres + area (for map shading) ---------------
 create or replace function public.ward_areas()
 returns table(ward_id text, city_corporation text, lat double precision, lng double precision)
 language sql stable security definer set search_path = public as $$
@@ -3666,7 +3290,6 @@ language sql stable security definer set search_path = public as $$
 $$;
 grant execute on function public.ward_areas() to anon, authenticated;
 
--- ---------- 6. Analytics: resources filter for every area-bound role ------
 create or replace function public.analytics_dashboard(p_days integer default 30, p_ward text default null)
 returns jsonb
 language plpgsql stable security definer set search_path = public as $$
@@ -3680,7 +3303,7 @@ begin
   end if;
   v_from := now() - make_interval(days => p_days);
 
-  with vw as (                       -- wards the caller may see (area-bound staff: own area only)
+  with vw as (
     select * from wards where rm_sees_ward(id) and (p_ward is null or id = p_ward)
   ), inc as (
     select * from incidents
@@ -3750,18 +3373,6 @@ end $$;
 grant execute on function public.analytics_dashboard(integer,text) to authenticated;
 
 
--- ================= migrations/013_ngo_allocation_lifecycle.sql =================
--- =====================================================================
--- ResilioMesh — 013 NGO coordinator: finish the aid lifecycle
--- Before: a coordinator could only RESERVE stock for a need. Nothing could mark it
--- delivered, give the stock back, or cancel a need, and any coordinator could edit
--- another NGO's needs directly. Now:
---   reserved -> dispatched -> consumed (delivered)      ngo_update_allocation()
---   reserved | dispatched -> released (stock returned)  ngo_update_allocation()
---   open / partially_fulfilled -> cancelled             cancel_need()
--- Idempotent: safe to re-run.
--- =====================================================================
-
 create or replace function public.ngo_update_allocation(
   p_allocation_id uuid, p_action text, p_reason text default null
 ) returns jsonb
@@ -3793,7 +3404,6 @@ begin
 
   v_new := case p_action when 'dispatch' then 'dispatched' when 'deliver' then 'consumed' else 'released' end;
 
-  -- idempotent replay: already in the requested end state
   if v_alloc.status = v_new then
     return jsonb_build_object('ok', true, 'replayed', true, 'allocation', to_jsonb(v_alloc));
   end if;
@@ -3809,7 +3419,6 @@ begin
   end if;
 
   if p_action = 'cancel' then
-    -- lock order matches allocate_to_need: need row first, then the stock row inside the release
     select * into v_need from community_needs where id = v_alloc.need_id for update;
     v_alloc := rm_release_allocation(p_allocation_id, coalesce(nullif(trim(p_reason), ''), 'cancelled by coordinator'));
     update community_needs
@@ -3857,8 +3466,6 @@ end $$;
 grant execute on function public.ngo_update_allocation(uuid,text,text) to authenticated;
 grant execute on function public.cancel_need(uuid,text) to authenticated;
 
--- Direct edits of a need by coordinators were unrestricted (any NGO, any column). Everything the
--- UI does now goes through RPCs, so direct updates are limited to the coordinator's own / unclaimed needs.
 drop policy if exists needs_update on community_needs;
 create policy needs_update on community_needs for update to authenticated
   using (rm_role() = 'admin'
@@ -3867,29 +3474,6 @@ create policy needs_update on community_needs for update to authenticated
          or (rm_role() = 'ngo_coordinator' and (organization_id is null or organization_id = rm_org())));
 
 
--- ================= migrations/014_ngo_coordinator_areas.sql =================
--- =====================================================================
--- ResilioMesh — 014 NGO coordinators: home area (Dhaka North / South) + cross-area backup
--- ---------------------------------------------------------------------
--- Until now every NGO coordinator acted on needs anywhere in Dhaka, so nobody in
--- particular was responsible for an area. From this migration:
---
---   * Every NGO coordinator has a HOME AREA: the city corporation (DNCC / DSCC) of
---     their "main operating area" ward (profiles.ward_id, asked at sign-up).
---   * A need in Dhaka North is the responsibility of the Dhaka North coordinators;
---     same for South. Only they allocate to it, cancel it, or ask for help.
---   * BACKUP, both ways. A coordinator of the other area may act on a need when
---       - the home coordinator asked for backup on that need          (need.backup_requested_at), or
---       - the home coordinators asked for backup for their whole area (ngo_area_backup row), or
---       - the area has NO active coordinator at all (nobody to wait for).
---   * Everyone still SEES all needs city-wide, and anyone may log a need anywhere.
---   * A coordinator's home area changes only by an admin (or the approval flow).
---     A coordinator without a home area acts only as backup.
---
--- Requires 009, 012 and 013. Re-runnable. If you re-run 004 or 013, run this file again.
--- =====================================================================
-
--- ---------- 1. Home area of a coordinator ---------------------------------
 create or replace function public.rm_ngo_area(p_user uuid default null) returns text
 language sql stable security definer set search_path = public as $$
   select w.city_corporation
@@ -3898,7 +3482,6 @@ language sql stable security definer set search_path = public as $$
 $$;
 grant execute on function public.rm_ngo_area(uuid) to authenticated;
 
--- Moving a coordinator to the other area changes who is responsible: admin only.
 create or replace function public.rm_ngo_area_guard() returns trigger
 language plpgsql security definer set search_path = public as $$
 declare v_old text; v_new text;
@@ -3920,7 +3503,6 @@ drop trigger if exists trg_ngo_area_guard on profiles;
 create trigger trg_ngo_area_guard before update of ward_id on profiles
   for each row execute function rm_ngo_area_guard();
 
--- ---------- 2. Backup requests --------------------------------------------
 alter table community_needs add column if not exists backup_requested_at timestamptz;
 alter table community_needs add column if not exists backup_requested_by uuid references profiles(id);
 alter table community_needs add column if not exists backup_note text check (backup_note is null or char_length(backup_note) <= 300);
@@ -3934,10 +3516,7 @@ create table if not exists ngo_area_backup (
 alter table ngo_area_backup enable row level security;
 drop policy if exists ngo_area_backup_read on ngo_area_backup;
 create policy ngo_area_backup_read on ngo_area_backup for select to authenticated using (rm_is_staff());
--- writes only through the RPCs below
 
--- ---------- 3. Who may act on a need? --------------------------------------
--- 'home' | 'backup' | 'uncovered' | 'admin' when allowed, null when not.
 create or replace function public.rm_ngo_access(p_need_id uuid) returns text
 language plpgsql stable security definer set search_path = public as $$
 declare v_role app_role := rm_role(); v_need_area text; v_my_area text; v_backup timestamptz;
@@ -3967,7 +3546,6 @@ begin
     rm_area_label(v_area) using errcode = '42501';
 end $$;
 
--- ---------- 4. Allocation (004 + area rule) ---------------------------------
 create or replace function public.allocate_to_need(
   p_need_id uuid, p_resource_id uuid, p_qty integer, p_idempotency_key text
 ) returns jsonb
@@ -4010,8 +3588,6 @@ begin
       using errcode = '22023';
   end if;
 
-  -- linked to the NEED only (not the report): the officer's pump / crew workflow resolving the
-  -- report must not auto-close NGO relief; the coordinator confirms delivery (013).
   v_alloc := rm_reserve_resource(p_resource_id, p_qty, p_idempotency_key, null, p_need_id, null, auth.uid());
 
   if not v_existing then
@@ -4020,7 +3596,6 @@ begin
            status = case when fulfilled_qty + p_qty >= quantity then 'fulfilled'::need_status
                          else 'partially_fulfilled'::need_status end,
            organization_id = coalesce(organization_id, v_res.organization_id),
-           -- help arrived and the need is covered: the backup request is done
            backup_requested_at = case when fulfilled_qty + p_qty >= quantity then null else backup_requested_at end
      where id = p_need_id;
   end if;
@@ -4028,7 +3603,6 @@ begin
   return jsonb_build_object('ok', true, 'replayed', v_existing, 'access', v_access, 'allocation', to_jsonb(v_alloc));
 end $$;
 
--- ---------- 5. Cancel a need (013 + area rule) -------------------------------
 create or replace function public.cancel_need(p_need_id uuid, p_reason text default null)
 returns jsonb
 language plpgsql security definer set search_path = public as $$
@@ -4043,7 +3617,6 @@ begin
   select * into v_need from community_needs where id = p_need_id for update;
   if not found then raise exception 'NOT_FOUND: need' using errcode = 'P0002'; end if;
   v_access := rm_assert_ngo_access(p_need_id);
-  -- closing a need is the home area's decision; backup helpers allocate, they do not close
   if v_access = 'backup' then
     raise exception 'FORBIDDEN: only the coordinators of this area can cancel the need' using errcode = '42501';
   end if;
@@ -4063,8 +3636,6 @@ begin
   return jsonb_build_object('ok', true, 'replayed', false);
 end $$;
 
--- ---------- 6. Ask the other area for help -----------------------------------
--- one need
 create or replace function public.request_ngo_backup(p_need_id uuid, p_on boolean default true, p_note text default null)
 returns jsonb
 language plpgsql security definer set search_path = public as $$
@@ -4090,7 +3661,6 @@ begin
   return jsonb_build_object('ok', true, 'backup', p_on);
 end $$;
 
--- the whole home area (e.g. Dhaka North is overwhelmed)
 create or replace function public.set_ngo_area_backup(p_on boolean, p_note text default null, p_area text default null)
 returns jsonb
 language plpgsql security definer set search_path = public as $$
@@ -4112,7 +3682,6 @@ begin
   return jsonb_build_object('ok', true, 'area', v_area, 'backup', p_on);
 end $$;
 
--- who covers which area (no names: counts only), for the NGO screen
 create or replace function public.ngo_area_status()
 returns table(area text, label text, coordinators integer, open_needs integer, backup_needs integer,
               area_backup boolean, area_backup_note text, area_backup_since timestamptz)
@@ -4135,7 +3704,6 @@ grant execute on function public.set_ngo_area_backup(boolean, text, text) to aut
 grant execute on function public.ngo_area_status() to authenticated;
 revoke execute on function public.rm_assert_ngo_access(uuid) from public, anon, authenticated;
 
--- ---------- 7. Direct edits of needs follow the same area rule ----------------
 drop policy if exists needs_update on community_needs;
 create policy needs_update on community_needs for update to authenticated
   using (rm_role() = 'admin'
@@ -4149,23 +3717,6 @@ do $$ begin
   alter publication supabase_realtime add table ngo_area_backup;
 exception when duplicate_object or undefined_object then null; end $$;
 
-
--- ================= migrations/015_split_officer_ngo_duties.sql =================
--- =====================================================================
--- ResilioMesh — 015 separate the Water Resilience Officer and NGO Coordinator jobs
--- ---------------------------------------------------------------------
---   Water Resilience Officer : the WATER. Verify / assess / resolve reports, plan and
---                              approve pump & crew dispatch in their own area.
---   NGO Coordinator          : the PEOPLE. Community needs and the NGO's own relief stock.
---
--- Until now approve_plan / reject_plan also accepted NGO coordinators, and the officer
--- area check did not apply to them, so a coordinator could dispatch a city corporation's
--- pumps and crews anywhere in Dhaka. All three plan / workflow RPCs (approve_plan,
--- reject_plan, retry_workflow_run) call rm_assert_officer_plan first, so the rule is
--- enforced there. Coordinators keep READ access to reports, plans and tasks.
---
--- Requires 009. Re-runnable. If you re-run 009, run this file again.
--- =====================================================================
 
 create or replace function public.rm_assert_officer_plan(p_incident_ids uuid[]) returns void
 language plpgsql stable security definer set search_path = public as $$
@@ -4182,24 +3733,6 @@ begin
 end $$;
 grant execute on function public.rm_assert_officer_plan(uuid[]) to authenticated;
 
-
--- ================= migrations/016_split_stock_by_role.sql =================
--- =====================================================================
--- ResilioMesh — 016 who sees and manages which stock
--- ---------------------------------------------------------------------
--- After 015 the plan / dispatch JOB was split, but the STOCK was still shared: an NGO
--- coordinator saw (and the Resources page listed) every authority's pumps and crews,
--- and an officer saw every NGO's relief stock. Now:
---
---   NGO Coordinator          : sees and edits ONLY their own NGO's stock, and may not
---                              register pumps or maintenance crews (authority equipment).
---   Water Resilience Officer : sees city-authority stock (own authority + authority stock
---                              based in their area). NGO relief stock is not theirs.
---   Field worker             : unchanged (own organisation + their area).
---   Admin                    : everything.
---
--- Requires 011 and 012. Re-runnable. If you re-run 003 or 011, run this file again.
--- =====================================================================
 
 create or replace function public.rm_is_authority_org(p_org uuid) returns boolean
 language sql stable security definer set search_path = public as $$

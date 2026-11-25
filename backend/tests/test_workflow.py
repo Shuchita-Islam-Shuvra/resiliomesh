@@ -1,4 +1,3 @@
-"""A07 — multi-step workflow: retries, intermediate failure, compensation, idempotent resume."""
 import pytest
 
 from app.workflow.engine import STEPS, WorkflowEngine
@@ -27,24 +26,22 @@ def test_happy_path_all_steps_succeed(store):
     assert store.resources["pump"]["available"] == 1 and store.resources["crew"]["available"] == 0
     assert {i["status"] for i in store.incidents.values()} == {"in_progress"}
     assert store.plans["plan-1"]["status"] == "executed"
-    assert len(store.tasks) == 3            # inc-1: pump+drain, inc-2: drain
+    assert len(store.tasks) == 3
     assert all(a["status"] == "dispatched" for a in store.allocations.values())
 
 
 def test_intermediate_failure_after_reservations_compensates(store):
-    """Reservations succeed, create_tasks keeps failing -> retries exhausted -> stock returned."""
     store.runs["run-1"]["inject_failure"] = "create_tasks"
     eng = WorkflowEngine(store, backoff_base_s=0)
-    run = lambda: store.runs["run-1"]   # noqa: E731 (store rolls back by replacing dicts)
+    run = lambda: store.runs["run-1"]
     r1 = eng.execute(dict(run()))
     assert r1["status"] == "retrying" and run()["status"] == "retrying"
-    assert store.resources["pump"]["available"] == 1          # reserved, kept during retry
+    assert store.resources["pump"]["available"] == 1
     run()["attempts"] = 2
     assert eng.execute(dict(run()))["status"] == "retrying"
     run()["attempts"] = 3
     r3 = eng.execute(dict(run()))
     assert r3["status"] == "compensated"
-    # compensation restored everything
     assert store.resources["pump"]["available"] == 3 and store.resources["crew"]["available"] == 2
     assert all(a["status"] == "released" for a in store.allocations.values())
     assert {i["status"] for i in store.incidents.values()} == {"assessed"}
@@ -62,16 +59,15 @@ def test_transient_failure_resumes_without_duplicating_side_effects(store):
     store.runs["run-1"]["attempts"] = 2
     assert eng.execute(dict(store.runs["run-1"]))["status"] == "succeeded"
     assert len(store.tasks) == tasks_before and len(store.allocations) == allocs_before
-    assert store.resources["pump"]["available"] == 1          # reserved exactly once
+    assert store.resources["pump"]["available"] == 1
     assert store.steps[("run-1", "notify_teams")]["attempts"] == 2
 
 
 def test_permanent_failure_is_atomic_no_partial_reservation(store):
-    store.resources["crew"]["available"] = 1                  # second crew reservation will fail
+    store.resources["crew"]["available"] = 1
     res = WorkflowEngine(store).execute(dict(store.runs["run-1"]))
     assert res["status"] == "compensated"
     assert "INSUFFICIENT_STOCK" in res["reason"]
-    # the pump reservation from the same step was rolled back with it
     assert store.resources["pump"]["available"] == 3 and store.resources["crew"]["available"] == 1
     assert store.allocations == {}
 
@@ -96,3 +92,44 @@ def test_crash_during_compensation_resumes(store):
     store.runs["run-1"]["last_error"] = "worker crashed"
     res = WorkflowEngine(store).execute(dict(store.runs["run-1"]))
     assert res["status"] == "compensated"
+
+
+def _task(store, incident_id, ttype):
+    return next(t for t in store.tasks.values() if t["incident_id"] == incident_id and t["task_type"] == ttype)
+
+
+def test_crew_size_follows_the_job():
+    from app.workflow.engine import MAX_CREW, crew_size
+    assert crew_size({"pump": 2}) == 2
+    assert crew_size({"boat": 1}) == 2
+    assert crew_size({"relief_kit": 100}) == 2
+    assert crew_size({"sandbag": 10}) == 1
+    assert crew_size({"pump": 9}) == MAX_CREW
+
+
+def test_tasks_get_a_crew_with_the_lead_first(store):
+    store.workers = ["w1", "w2", "w3"]
+    WorkflowEngine(store).execute(dict(store.runs["run-1"]))
+    pump = _task(store, "inc-1", "pump_deployment")
+    assert pump["crew_size"] == 2 and len(pump["crew"]) == 2
+    assert pump["assigned_to"] == pump["crew"][0] and pump["status"] == "assigned"
+    assert set(store.notifications[-1][1]) == {w for t in store.tasks.values() for w in t["crew"]}
+
+
+def test_only_the_right_team_on_duty_gets_the_job(store):
+    store.workers = ["pump-op", "drain-1", "relief", "pump-off"]
+    store.worker_tasks = {"pump-op": ["pump_deployment"], "pump-off": ["pump_deployment"],
+                          "drain-1": ["drain_clearing"], "relief": ["relief_distribution"]}
+    store.off_duty = {"pump-off"}
+    WorkflowEngine(store).execute(dict(store.runs["run-1"]))
+    assert _task(store, "inc-1", "pump_deployment")["crew"] == ["pump-op"]
+    assert _task(store, "inc-1", "drain_clearing")["crew"][0] == "drain-1"
+    assert all("relief" not in t["crew"] for t in store.tasks.values())
+
+
+def test_nobody_fits_task_waits_pending_for_an_officer(store):
+    store.workers = ["relief"]
+    store.worker_tasks = {"relief": ["relief_distribution"]}
+    res = WorkflowEngine(store).execute(dict(store.runs["run-1"]))
+    assert res["status"] == "succeeded"
+    assert all(t["status"] == "pending" and t["assigned_to"] is None for t in store.tasks.values())

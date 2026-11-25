@@ -1,5 +1,3 @@
--- Minimal Supabase-compatible environment for running migrations on plain Postgres+PostGIS
--- (CI / local verification only — NOT needed on a real Supabase project).
 do $$ begin
   create role anon nologin; exception when duplicate_object then null; end $$;
 do $$ begin
@@ -16,7 +14,6 @@ create table if not exists auth.users (
   raw_user_meta_data jsonb default '{}'::jsonb,
   created_at timestamptz default now()
 );
--- live sessions (session_id claim) and MFA factors, as in Supabase Auth
 create table if not exists auth.sessions (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade,

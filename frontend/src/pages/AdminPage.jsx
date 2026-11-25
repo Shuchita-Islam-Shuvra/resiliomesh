@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Activity, AlertTriangle, BadgeCheck, Building2, Check, FileText, FlaskConical, Globe, Lock, ScrollText, Upload, UserCheck, Users, X } from 'lucide-react'
+import { Activity, AlertTriangle, BadgeCheck, Building2, Check, FileText, FlaskConical, Globe, KeyRound, Lock, ScrollText, ShieldCheck, Upload, UserCheck, Users, X } from 'lucide-react'
 import { Alert, Button, Card, EmptyState, Field, Input, Modal, PageHeader, Pagination, Select, Spinner, StatCard, Tabs, Textarea, Th } from '../components/ui'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
@@ -8,6 +8,7 @@ import { parseCsv } from '../lib/csv'
 import { errorMessage } from '../lib/errors'
 import { BLOCKER_LABEL, CHECK_LABEL, DOC_KINDS, FLAG_LABEL } from '../lib/identity'
 import { ROLE_LABEL, fmtDateTime, fmtNum } from '../lib/format'
+import { FIELD_TEAMS } from '../lib/roles'
 import { supabase } from '../lib/supabase'
 
 export default function AdminPage() {
@@ -24,6 +25,7 @@ export default function AdminPage() {
   return (
     <>
       <PageHeader title="Audit logs & administration" description="Append-only audit trail written by database triggers, account & role management, system health and fault-injection controls." />
+      <DutyBanner />
       <Tabs value={tab} onChange={setTab} tabs={[{ value: 'audit', label: 'Audit log' }, { value: 'requests', label: 'Access requests', count: pending || undefined }, { value: 'users', label: 'Users & roles' }, { value: 'verification', label: 'Verification data' }, { value: 'system', label: 'System health & chaos' }]} />
       {tab === 'audit' && <Audit />}
       {tab === 'requests' && <RequestsTab />}
@@ -32,6 +34,32 @@ export default function AdminPage() {
       {tab === 'system' && <SystemTab />}
     </>
   )
+}
+
+const DUTY = {
+  owner: { icon: KeyRound, title: 'Your duty: System owner', tag: 'System owner',
+    text: 'You set the platform up: official e-mail domains and NGOAB numbers, the staff roster, the NGOAB registry, and fault injection. You also review access and read the audit log with the second admin.' },
+  reviewer: { icon: ShieldCheck, title: 'Your duty: Security & audit officer', tag: 'Access reviewer',
+    text: 'You review access requests (and approve the system owner\'s proposals), watch the audit log and revoke or deactivate at once when something is wrong. Platform set-up (roster, NGOAB registry, official domains, fault injection) belongs to the system owner, so those controls are read-only for you.' },
+}
+
+function DutyBanner() {
+  const { adminScope } = useAuth()
+  const d = DUTY[adminScope]
+  if (!d) return null
+  const Icon = d.icon
+  return (
+    <div className="mb-4 flex gap-3 rounded-xl border border-brand-100 bg-brand-50/60 p-3 text-sm">
+      <Icon className="mt-0.5 h-5 w-5 shrink-0 text-brand-700" aria-hidden />
+      <div><p className="font-semibold text-slate-800">{d.title}</p><p className="text-slate-600">{d.text}</p></div>
+    </div>
+  )
+}
+
+function OwnerOnlyNote() {
+  const { isSystemOwner } = useAuth()
+  if (isSystemOwner) return null
+  return <p className="flex items-center gap-1.5 border-b border-amber-100 bg-amber-50 px-4 py-2 text-xs text-amber-800"><Lock className="h-3.5 w-3.5" aria-hidden />Read-only for you: only the system owner changes this.</p>
 }
 
 const PAGE = 25
@@ -103,7 +131,7 @@ function UsersTab() {
   const [users, setUsers] = useState(null)
   const [orgs, setOrgs] = useState([])
   const [q, setQ] = useState('')
-  const [propose, setPropose] = useState(null)       // user being changed
+  const [propose, setPropose] = useState(null)
   const load = useCallback(async () => {
     const { data } = await supabase.from('profiles').select('*, organizations(name)').order('created_at', { ascending: false })
     setUsers(data || [])
@@ -134,7 +162,19 @@ function UsersTab() {
                     <p className="text-xs text-slate-500">{u.email} {'email_verified_at' in u && (u.email_verified_at ? <span title="E-mail confirmed" className="text-emerald-600">✓</span> : <span title="E-mail not confirmed" className="text-rose-600">✗</span>)}</p>
                     {u.phone && <p className="text-xs text-slate-500">{u.phone} {u.phone_verified_at ? <span title="Verified by SMS" className="text-emerald-600">✓</span> : <span title="Not verified" className="text-slate-400">(unverified)</span>}</p>}
                   </td>
-                  <td className="px-3 py-2 text-xs font-medium">{ROLE_LABEL[u.role]}</td>
+                  <td className="px-3 py-2 text-xs font-medium">
+                    {ROLE_LABEL[u.role]}
+                    {u.role === 'admin' && DUTY[u.admin_scope || 'owner'] && (
+                      <span className="mt-0.5 block w-fit rounded bg-brand-50 px-1.5 py-0.5 text-[11px] font-medium text-brand-800 ring-1 ring-inset ring-brand-100">{DUTY[u.admin_scope || 'owner'].tag}</span>
+                    )}
+                    {u.role === 'field_worker' && 'field_team' in u && (
+                      <Select aria-label={`Team of ${u.full_name}`} className="mt-1 max-w-[170px] py-1 text-xs font-normal" value={u.field_team || ''}
+                        onChange={(e) => update(u, { field_team: e.target.value || null }, `team set to ${e.target.value || 'none'}`)}>
+                        <option value="">No team (any task)</option>
+                        {FIELD_TEAMS.map((t) => <option key={t}>{t}</option>)}
+                      </Select>
+                    )}
+                  </td>
                   <td className="px-3 py-2 text-xs">{u.organizations?.name || '—'}</td>
                   <td className="px-3 py-2 font-mono text-xs">{u.employee_id || <span className="font-sans text-slate-400">{u.role === 'citizen' || u.role === 'ngo_coordinator' ? '—' : 'missing'}</span>}</td>
                   <td className="px-3 py-2 text-xs">{u.is_active ? 'Active' : <span className="font-semibold text-rose-600">Deactivated</span>}</td>
@@ -153,7 +193,7 @@ function UsersTab() {
           </tbody>
         </table>
       </div>
-      <p className="px-4 pb-4 text-xs text-slate-500">Enforced in the database: one admin can revoke or deactivate, but granting a staff or admin role, moving a staff member to another organisation, changing a staff ID or re-activating staff needs a <b>second admin</b> to approve (Access requests tab). Admins cannot change their own access.</p>
+      <p className="px-4 pb-4 text-xs text-slate-500">Enforced in the database: one admin can revoke or deactivate, but granting a staff or admin role, moving a staff member to another organisation, changing a staff ID or re-activating staff needs a <b>second admin</b> to approve (Access requests tab). Admins cannot change their own access. The two admins have different duties (system owner / access reviewer); duties are set by the platform team, never from the app.</p>
       <ProposeModal user={propose} orgs={orgs} onClose={() => setPropose(null)} onDone={() => { setPropose(null); load() }} />
     </Card>
   )
@@ -202,18 +242,18 @@ function RequestsTab() {
   const toast = useToast()
   const [status, setStatus] = useState('pending')
   const [rows, setRows] = useState(null)
-  const [docs, setDocs] = useState({})       // request id -> documents
+  const [docs, setDocs] = useState({})
   const [err, setErr] = useState('')
   const [orgs, setOrgs] = useState([])
-  const [pick, setPick] = useState({})      // request id -> chosen org id
-  const [notes, setNotes] = useState({})    // request id -> review note
+  const [pick, setPick] = useState({})
+  const [notes, setNotes] = useState({})
   const [busy, setBusy] = useState(null)
   const load = useCallback(async () => {
     const base = '*, applicant:profiles!role_requests_user_id_fkey(full_name, email, phone, role), organizations(name), wards(name)'
     let { data, error } = await supabase.from('role_requests')
       .select(`${base}, verification, proposer:profiles!role_requests_requested_by_fkey(full_name)`)
       .eq('status', status).order('created_at', { ascending: false }).limit(200)
-    if (error && /verification|requested_by/i.test(error.message)) {      // migration 008 not applied yet
+    if (error && /verification|requested_by/i.test(error.message)) {
       ({ data, error } = await supabase.from('role_requests').select(base).eq('status', status).order('created_at', { ascending: false }).limit(200))
     }
     if (error) {
@@ -373,7 +413,6 @@ function RequestsTab() {
   )
 }
 
-// ---------- official registries & domains ----------
 function VerificationTab() {
   const [settings, setSettings] = useState(null)
   useEffect(() => { supabase.rpc('rm_public_security_settings').then(({ data }) => setSettings(data || null)) }, [])
@@ -403,6 +442,7 @@ function VerificationTab() {
 
 function OrgDomains() {
   const toast = useToast()
+  const { isSystemOwner: canEdit } = useAuth()
   const [orgs, setOrgs] = useState(null)
   const [edit, setEdit] = useState({})
   const load = useCallback(async () => {
@@ -420,6 +460,7 @@ function OrgDomains() {
   }
   return (
     <Card title="Official e-mail domains" icon={Globe} subtitle="Water Resilience Officers must sign up with one of their authority's domains (e.g. dncc.gov.bd); NGO staff with their NGO's domain. Public mail providers are refused." bodyClass="p-0">
+      <OwnerOnlyNote />
       {!orgs ? <Spinner /> : (
         <div className="overflow-x-auto">
           <table className="min-w-full text-sm">
@@ -428,11 +469,11 @@ function OrgDomains() {
               {orgs.map((o) => (
                 <tr key={o.id}>
                   <td className="px-3 py-2"><p className="font-medium">{o.name}</p><p className="text-xs text-slate-500">{o.type === 'ngo' ? 'NGO' : 'City authority'}</p></td>
-                  <td className="px-3 py-2"><Input aria-label={`Domains for ${o.name}`} className="!py-1 font-mono text-xs" placeholder="dncc.gov.bd" value={edit[o.id]?.domains || ''} onChange={(e) => setEdit({ ...edit, [o.id]: { ...edit[o.id], domains: e.target.value } })} /></td>
+                  <td className="px-3 py-2"><Input disabled={!canEdit} aria-label={`Domains for ${o.name}`} className="!py-1 font-mono text-xs" placeholder="dncc.gov.bd" value={edit[o.id]?.domains || ''} onChange={(e) => setEdit({ ...edit, [o.id]: { ...edit[o.id], domains: e.target.value } })} /></td>
                   <td className="px-3 py-2">{o.type === 'ngo'
-                    ? <Input aria-label={`NGOAB number for ${o.name}`} className="!w-36 !py-1 font-mono text-xs" value={edit[o.id]?.reg || ''} onChange={(e) => setEdit({ ...edit, [o.id]: { ...edit[o.id], reg: e.target.value } })} />
+                    ? <Input disabled={!canEdit} aria-label={`NGOAB number for ${o.name}`} className="!w-36 !py-1 font-mono text-xs" value={edit[o.id]?.reg || ''} onChange={(e) => setEdit({ ...edit, [o.id]: { ...edit[o.id], reg: e.target.value } })} />
                     : <span className="text-xs text-slate-400">—</span>}</td>
-                  <td className="px-3 py-2"><Button size="sm" variant="secondary" onClick={() => save(o)}>Save</Button></td>
+                  <td className="px-3 py-2"><Button size="sm" variant="secondary" disabled={!canEdit} onClick={() => save(o)}>Save</Button></td>
                 </tr>
               ))}
             </tbody>
@@ -466,6 +507,7 @@ function ImportResult({ result }) {
 
 function RosterImport() {
   const toast = useToast()
+  const { isSystemOwner: canEdit } = useAuth()
   const [orgs, setOrgs] = useState([])
   const [org, setOrg] = useState('')
   const [csv, setCsv] = useState('')
@@ -492,6 +534,7 @@ function RosterImport() {
   }
   return (
     <Card title="Official staff roster" icon={Users} subtitle="Upload the list each city corporation / NGO HR office provides. Sign-up requests are matched against it (Employee ID + official e-mail).">
+      {!canEdit && <div className="-mx-4 -mt-4 mb-4 sm:-mx-5 sm:-mt-5"><OwnerOnlyNote /></div>}
       <div className="grid gap-4 lg:grid-cols-2">
         <div className="space-y-3">
           <Select aria-label="Roster organisation" value={org} onChange={(e) => { setOrg(e.target.value); setResult(null) }}>
@@ -499,7 +542,7 @@ function RosterImport() {
           </Select>
           <CsvInput value={csv} onChange={setCsv} placeholder={'employee_id,official_email,full_name,role\nDSCC-2024-118,rahim@dscc.gov.bd,Rahim Uddin,city_officer'} />
           <label className="flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={replace} onChange={(e) => setReplace(e.target.checked)} className="h-4 w-4 rounded border-slate-300" />Replace: deactivate people not in this file (left the organisation)</label>
-          <Button loading={busy} onClick={run}><Upload className="h-4 w-4" />Import roster</Button>
+          <Button loading={busy} disabled={!canEdit} onClick={run}><Upload className="h-4 w-4" />Import roster</Button>
           <ImportResult result={result} />
         </div>
         <div className="max-h-80 overflow-auto rounded-lg border border-slate-200">
@@ -524,6 +567,7 @@ function RosterImport() {
 
 function NgoRegistryImport() {
   const toast = useToast()
+  const { isSystemOwner: canEdit } = useAuth()
   const [csv, setCsv] = useState('')
   const [q, setQ] = useState('')
   const [rows, setRows] = useState([])
@@ -547,10 +591,11 @@ function NgoRegistryImport() {
   }
   return (
     <Card title="NGO Affairs Bureau registry" icon={Building2} subtitle="The NGOAB list of registered NGOs. NGO Coordinator requests are checked against the registration number.">
+      {!canEdit && <div className="-mx-4 -mt-4 mb-4 sm:-mx-5 sm:-mt-5"><OwnerOnlyNote /></div>}
       <div className="grid gap-4 lg:grid-cols-2">
         <div className="space-y-3">
           <CsvInput value={csv} onChange={setCsv} placeholder={'registration_no,name,district,status,valid_until\n2891,Example Relief Foundation,Dhaka,active,2030-06-30'} />
-          <Button loading={busy} onClick={run}><Upload className="h-4 w-4" />Import registry</Button>
+          <Button loading={busy} disabled={!canEdit} onClick={run}><Upload className="h-4 w-4" />Import registry</Button>
           <ImportResult result={result} />
         </div>
         <div>
@@ -571,6 +616,7 @@ function NgoRegistryImport() {
 
 function SystemTab() {
   const toast = useToast()
+  const { isSystemOwner: canEdit } = useAuth()
   const [h, setH] = useState(null)
   const [err, setErr] = useState('')
   const load = useCallback(() => api('/api/admin/health').then((x) => { setH(x); setErr('') }).catch((e) => setErr(e.message)), [])
@@ -595,9 +641,10 @@ function SystemTab() {
       <Card title="Chaos testing — external API fault injection" subtitle="Demonstrates A06: the app must keep working when the weather API times out or returns garbage">
         <div className="flex flex-wrap gap-2">
           {[['normal', 'Normal'], ['timeout', 'Simulate timeout'], ['error500', 'Simulate 503 outage'], ['malformed', 'Simulate malformed JSON']].map(([m, l]) => (
-            <Button key={m} variant={h.weather.chaos_mode === m ? 'primary' : 'secondary'} onClick={() => chaos(m)}><FlaskConical className="h-4 w-4" />{l}</Button>
+            <Button key={m} variant={h.weather.chaos_mode === m ? 'primary' : 'secondary'} disabled={!canEdit} onClick={() => chaos(m)}><FlaskConical className="h-4 w-4" />{l}</Button>
           ))}
         </div>
+        {!canEdit && <p className="mt-2 flex items-center gap-1.5 text-xs text-amber-800"><Lock className="h-3.5 w-3.5" aria-hidden />Fault injection is the system owner's job. You can watch the result here (breaker, degraded scores).</p>}
         <p className="mt-3 text-sm text-slate-600">Then open AI Risk Analysis → "Re-score all wards": scores still compute from stale cache / climatology, flagged as degraded. After 3 failures the circuit breaker opens and the upstream is skipped for 60 s.</p>
         <p className="mt-1 text-xs text-slate-500">Served so far: {Object.entries(h.weather.stats).map(([k, v]) => `${k} ${v}`).join(' · ')}</p>
       </Card>

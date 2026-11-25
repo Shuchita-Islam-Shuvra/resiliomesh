@@ -1,25 +1,3 @@
--- =====================================================================
--- ResilioMesh — 009 officer areas (Dhaka North / Dhaka South)
--- ---------------------------------------------------------------------
--- Dhaka has two city corporations: DNCC (Dhaka North) and DSCC (Dhaka South).
--- Every ward already belongs to one of them (wards.city_corporation).
--- Until now a Water Resilience Officer (role key `city_officer`) could verify, assess,
--- plan and resolve incidents anywhere in Dhaka. From this migration:
---
---   * organizations.city_corporation  = the area a drainage authority serves.
---   * An officer's area comes from their organisation (profile → org → area).
---     It is never stored on the profile, so moving an officer between areas
---     still goes through the two-admin access-change flow of migration 008.
---   * Officers can only change incidents, drainage assets, plans, tasks and
---     workflow runs in wards of their own area. They can still READ the whole
---     city (floods cross the North/South boundary).
---   * An officer whose organisation has no area can change nothing (fail-safe).
---   * Admins stay city-wide. NGO coordinators and field workers are unchanged.
---
--- Re-runnable. If you re-run 003_rls.sql or 004_rpc.sql, run this file again.
--- =====================================================================
-
--- ---------- 1. Area of each drainage authority -------------------------
 alter table organizations add column if not exists city_corporation text;
 alter table organizations drop constraint if exists organizations_area_check;
 alter table organizations add constraint organizations_area_check
@@ -31,8 +9,6 @@ update organizations set city_corporation = 'DNCC'
 update organizations set city_corporation = 'DSCC'
  where id = '11111111-1111-1111-1111-111111111102' and city_corporation is null;
 
--- Changing an authority's area would silently move all its officers, which
--- bypasses two-admin approval. Once set, only the trusted backend can change it.
 create or replace function public.rm_org_area_guard() returns trigger
 language plpgsql as $$
 begin
@@ -47,19 +23,16 @@ drop trigger if exists trg_org_area_guard on organizations;
 create trigger trg_org_area_guard before update on organizations
   for each row execute function rm_org_area_guard();
 
--- ---------- 2. Helpers ----------------------------------------------------
 create or replace function public.rm_area_label(p_area text) returns text
 language sql immutable as $$
   select case p_area when 'DNCC' then 'Dhaka North' when 'DSCC' then 'Dhaka South' else 'no area' end
 $$;
 
--- area of the signed-in staff member (null for citizens, admins without an authority, NGOs)
 create or replace function public.rm_area() returns text
 language sql stable security definer set search_path = public as $$
   select o.city_corporation from organizations o where o.id = rm_org()
 $$;
 
--- may the caller change things in this ward?
 create or replace function public.rm_can_manage_ward(p_ward text) returns boolean
 language sql stable security definer set search_path = public as $$
   select case rm_role()
@@ -70,7 +43,6 @@ language sql stable security definer set search_path = public as $$
          end
 $$;
 
--- raise a clear error when an officer acts outside their area (no-op for other roles)
 create or replace function public.rm_assert_officer_area(p_ward text) returns void
 language plpgsql stable security definer set search_path = public as $$
 declare v_ward_area text;
@@ -86,7 +58,6 @@ grant execute on function public.rm_area() to authenticated;
 grant execute on function public.rm_can_manage_ward(text) to authenticated;
 grant execute on function public.rm_assert_officer_area(text) to authenticated;
 
--- ---------- 3. Row Level Security -----------------------------------------
 drop policy if exists incidents_update on incidents;
 create policy incidents_update on incidents for update to authenticated
   using ((reporter_id = auth.uid() and status = 'reported') or rm_can_manage_ward(ward_id))
@@ -103,7 +74,6 @@ create policy assets_update on drainage_assets for update to authenticated
   with check (rm_role() = 'admin'
          or (rm_role() = 'city_officer' and owner_org_id = rm_org() and rm_can_manage_ward(ward_id)));
 
--- ---------- 4. RPCs (same as 004, plus the area check) --------------------
 create or replace function public.transition_incident(
   p_incident_id uuid, p_to incident_status, p_expected_version integer,
   p_note text default null, p_duplicate_of uuid default null
@@ -122,7 +92,6 @@ begin
     return jsonb_build_object('ok', false, 'conflict', true, 'current', to_jsonb(v_inc));
   end if;
 
-  -- role rules per target state
   if p_to in ('verified','rejected','duplicate','resolved','assessed') and v_role not in ('city_officer','admin') then
     raise exception 'FORBIDDEN: % cannot move an incident to %', v_role, p_to using errcode = '42501';
   end if;
@@ -157,7 +126,6 @@ begin
   return jsonb_build_object('ok', true, 'incident', to_jsonb(v_inc));
 end $$;
 
--- every incident of a plan must be in the officer's area
 create or replace function public.rm_assert_officer_plan(p_incident_ids uuid[]) returns void
 language plpgsql stable security definer set search_path = public as $$
 declare v_ward text;
@@ -193,7 +161,6 @@ begin
   if not found then raise exception 'NOT_FOUND: plan' using errcode = 'P0002'; end if;
   perform rm_assert_officer_plan(v_plan.incident_ids);
 
-  -- idempotent approve: second click returns the same run
   if v_plan.status in ('approved','executing','executed') then
     select * into v_run from workflow_runs where plan_id = p_plan_id;
     return jsonb_build_object('ok', true, 'replayed', true, 'run_id', v_run.id);
@@ -221,7 +188,6 @@ begin
   update allocation_plans set status = 'approved', approved_by = auth.uid(), approved_at = now()
   where id = p_plan_id;
 
-  -- supersede other pending plans touching the same incidents
   update allocation_plans set status = 'superseded'
   where id <> p_plan_id and status = 'pending_approval' and incident_ids && v_plan.incident_ids;
 
@@ -268,7 +234,6 @@ begin
   if v_run.status not in ('failed','compensated') then
     raise exception 'INVALID_STATE: only failed runs can be retried' using errcode = '23514';
   end if;
-  -- incidents were rolled back to 'assessed' by compensation; re-approve them
   perform set_config('rm.note', 'Workflow retry', true);
   update incidents i set status = 'approved'
     from allocation_plans p
@@ -327,7 +292,6 @@ begin
     completed_at = case when p_status = 'completed' then now() else completed_at end
   where id = p_task_id returning * into v_task;
 
-  -- all tasks of the incident completed -> resolve incident, return reusable equipment
   if p_status = 'completed' then
     select count(*) into v_open from tasks
      where incident_id = v_task.incident_id and status not in ('completed','cancelled');

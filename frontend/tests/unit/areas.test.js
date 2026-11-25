@@ -25,16 +25,15 @@ describe('Water Resilience Officer areas', () => {
     }
   })
 
-  // real ward centres from supabase/seed.sql
   const WARDS = [
     ['DNCC-05', 'DNCC', 23.759, 90.3926], ['DNCC-09', 'DNCC', 23.7509, 90.3935], ['DNCC-01', 'DNCC', 23.8759, 90.3795],
     ['DSCC-01', 'DSCC', 23.7461, 90.3742], ['DSCC-04', 'DSCC', 23.733, 90.4172], ['DSCC-03', 'DSCC', 23.7487, 90.413],
   ].map(([ward_id, city_corporation, lat, lng]) => ({ ward_id, city_corporation, lat, lng }))
 
   it('a place belongs to the area of its nearest ward centre', () => {
-    expect(areaAt(WARDS, 23.7332, 90.4170)).toBe('DSCC')   // Motijheel
-    expect(areaAt(WARDS, 23.7512, 90.3933)).toBe('DNCC')   // Kawran Bazar: north, though south of Malibagh
-    expect(areaAt(WARDS, 23.88, 90.38)).toBe('DNCC')       // Uttara
+    expect(areaAt(WARDS, 23.7332, 90.4170)).toBe('DSCC')
+    expect(areaAt(WARDS, 23.7512, 90.3933)).toBe('DNCC')
+    expect(areaAt(WARDS, 23.88, 90.38)).toBe('DNCC')
     expect(areaAt([], 23.7, 90.4)).toBe(null)
   })
 
@@ -45,7 +44,7 @@ describe('Water Resilience Officer areas', () => {
       expect(c.ring.length).toBeGreaterThan(2)
       const lat = c.ring.reduce((s, p) => s + p[0], 0) / c.ring.length
       const lng = c.ring.reduce((s, p) => s + p[1], 0) / c.ring.length
-      expect(areaAt(WARDS, lat, lng)).toBe(c.city_corporation)   // a cell's centre is in its own area
+      expect(areaAt(WARDS, lat, lng)).toBe(c.city_corporation)
     }
   })
 })

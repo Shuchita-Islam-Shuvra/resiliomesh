@@ -1,5 +1,3 @@
-// M01 end-to-end: citizen report -> officer verify -> AI assess -> optimise -> approve -> workflow
-// A01: two officers edit the same incident concurrently -> conflict detected
 import { expect, test } from '@playwright/test'
 import { PASSWORD, login } from './helpers'
 
@@ -7,7 +5,6 @@ test.skip(!PASSWORD, 'E2E_PASSWORD not set (seed demo users first)')
 
 test('full incident lifecycle across three roles', async ({ browser }) => {
   const title = `E2E knee-deep water ${Date.now()}`
-  // 1. citizen reports
   const citizen = await (await browser.newContext()).newPage()
   await login(citizen, 'citizen')
   await citizen.goto('/incidents/new')
@@ -20,7 +17,6 @@ test('full incident lifecycle across three roles', async ({ browser }) => {
   await citizen.waitForURL(/\/incidents\/[0-9a-f-]{36}/)
   const url = citizen.url()
 
-  // 2. officer verifies + runs AI
   const officer = await (await browser.newContext()).newPage()
   await login(officer, 'officer')
   await officer.goto(url.replace(/^https?:\/\/[^/]+/, ''))
@@ -29,10 +25,8 @@ test('full incident lifecycle across three roles', async ({ browser }) => {
   await officer.getByRole('button', { name: /run ai risk assessment/i }).click()
   await expect(officer.getByText(/why this risk score/i)).toBeVisible({ timeout: 30_000 })
 
-  // citizen sees the status change live (realtime)
   await expect(citizen.getByText('Assessed').first()).toBeVisible({ timeout: 15_000 })
 
-  // 3. optimise and approve
   await officer.getByRole('link', { name: 'Plan resources' }).click()
   await officer.getByRole('button', { name: /run optimiser/i }).click()
   await expect(officer.getByText('Optimiser result')).toBeVisible({ timeout: 30_000 })
@@ -49,7 +43,6 @@ test('A01: concurrent edits by two officers are detected, not silently overwritt
   await login(b, 'officer2')
   await a.goto('/incidents?tab=assets')
   await b.goto('/incidents?tab=assets')
-  // both open the same asset editor
   await a.getByRole('button', { name: /^Edit DR-MRP-002/ }).click()
   await b.getByRole('button', { name: /^Edit DR-MRP-002/ }).click()
   await a.getByLabel('Condition (0–100)').fill('41')

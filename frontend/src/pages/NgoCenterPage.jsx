@@ -30,9 +30,9 @@ export default function NgoCenterPage() {
 
   const isAdmin = hasRole('admin')
   const [allocs, setAllocs] = useState([])
-  const [confirm, setConfirm] = useState(null) // { kind: 'alloc'|'need'|'backup'|'areaBackup', action, item }
-  const [areas, setAreas] = useState({})       // DNCC / DSCC -> coordinators, open needs, backup state
-  const [scope, setScope] = useState('mine')   // mine | help | all
+  const [confirm, setConfirm] = useState(null)
+  const [areas, setAreas] = useState({})
+  const [scope, setScope] = useState('mine')
   const [note, setNote] = useState('')
 
   const load = useCallback(async () => {
@@ -52,7 +52,6 @@ export default function NgoCenterPage() {
   useEffect(() => { load(); supabase.from('wards').select('id,name,city_corporation').order('name').then(({ data }) => setWards(data || [])) }, [load])
   useRealtime(['community_needs', 'resources', 'allocations', 'ngo_area_backup'], useDebouncedCallback(load, 500))
 
-  // Opened from a report ("Log relief need"): start the form for that report's ward
   useEffect(() => {
     const incident = params.get('incident')
     if (!incident) return
@@ -61,7 +60,6 @@ export default function NgoCenterPage() {
     setParams({}, { replace: true })
   }, [params, setParams])
 
-  // ---- North / South responsibility (migration 014). The database enforces the same rule.
   const myArea = useMemo(() => wards.find((w) => w.id === profile.ward_id)?.city_corporation || null, [wards, profile.ward_id])
   const otherArea = myArea === 'DNCC' ? 'DSCC' : myArea === 'DSCC' ? 'DNCC' : null
   const access = useCallback((n) => {

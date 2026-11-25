@@ -115,7 +115,7 @@ backend/app/           FastAPI: ml/ services/ workflow/ api/ core/
 backend/tests/         pytest (unit + real-DB)
 frontend/src/          React pages, offline/, hooks/, lib/
 frontend/tests/        vitest unit + Playwright e2e
-scripts/               generate_data.py · seed_demo.py · test_db/ (Supabase stub for CI)
+scripts/               generate_data.py · seed_demo.py · demo_dispatch.py (real tasks for the field crews) · test_db/ (Supabase stub for CI)
 data/                  training CSV, climatology, 125k-row dirty bulk-import sample
 docs/                  setup, testing, requirement matrix, 2-day plan
 ```

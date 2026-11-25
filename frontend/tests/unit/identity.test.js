@@ -1,4 +1,3 @@
-// Identity verification rules (migration 008 mirrored in the browser)
 import { describe, expect, it } from 'vitest'
 import { emailPolicyError, normalizeBdPhone } from '../../src/lib/identity'
 import { parseCsv } from '../../src/lib/csv'

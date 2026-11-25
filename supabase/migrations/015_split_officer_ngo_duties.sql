@@ -1,19 +1,3 @@
--- =====================================================================
--- ResilioMesh — 015 separate the Water Resilience Officer and NGO Coordinator jobs
--- ---------------------------------------------------------------------
---   Water Resilience Officer : the WATER. Verify / assess / resolve reports, plan and
---                              approve pump & crew dispatch in their own area.
---   NGO Coordinator          : the PEOPLE. Community needs and the NGO's own relief stock.
---
--- Until now approve_plan / reject_plan also accepted NGO coordinators, and the officer
--- area check did not apply to them, so a coordinator could dispatch a city corporation's
--- pumps and crews anywhere in Dhaka. All three plan / workflow RPCs (approve_plan,
--- reject_plan, retry_workflow_run) call rm_assert_officer_plan first, so the rule is
--- enforced there. Coordinators keep READ access to reports, plans and tasks.
---
--- Requires 009. Re-runnable. If you re-run 009, run this file again.
--- =====================================================================
-
 create or replace function public.rm_assert_officer_plan(p_incident_ids uuid[]) returns void
 language plpgsql stable security definer set search_path = public as $$
 declare v_ward text;

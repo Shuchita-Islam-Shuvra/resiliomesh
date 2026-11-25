@@ -1,24 +1,21 @@
 import { useEffect, useMemo, useState } from 'react'
-import { BadgeCheck, LogOut, ShieldAlert } from 'lucide-react'
+import { BadgeCheck, LogOut, ShieldAlert, Sparkles } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
+import { demoSignInFor } from '../lib/demoAccounts'
 import { ROLE_BY_KEY } from '../lib/roles'
 import { supabase } from '../lib/supabase'
 import { SIGNIN_ID_LABEL } from '../lib/validation'
 import { Alert, Button, Card, Field, Input, Select } from './ui'
 import { TotpChallenge, TotpEnroll } from './VerifyPanels'
 
-/**
- * Shown instead of the app while a staff account's session has not passed the
- * server-side checks (staff ID / NGO, then authenticator code when required).
- * Until then the database only grants this session citizen-level access.
- */
 export default function SessionGate() {
   const { profile, security, verifyStaffSession, signOut } = useAuth()
   const role = profile?.account_role
   const R = ROLE_BY_KEY[role]
   const idLabel = SIGNIN_ID_LABEL[role]
+  const demo = demoSignInFor(profile?.email)
   const [staffId, setStaffId] = useState('')
-  const [orgId, setOrgId] = useState('')
+  const [orgId, setOrgId] = useState(demo?.orgId || '')
   const [orgs, setOrgs] = useState([])
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
@@ -49,9 +46,22 @@ export default function SessionGate() {
               {security?.staff_expires_at ? 'Your verified staff session has ended. ' : ''}
               Staff permissions are only switched on after the server checks your {idLabel || 'NGO'} for this session.
             </Alert>
+            {demo && (demo.staffId || demo.orgId) && (
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                <span className="flex items-center gap-1.5">
+                  <Sparkles className="h-4 w-4" aria-hidden />Demo account. {idLabel && demo.staffId
+                    ? <>{idLabel}: <code className="rounded bg-white px-1.5 py-0.5 font-mono font-semibold">{demo.staffId}</code></>
+                    : <>NGO is pre-selected.</>}
+                </span>
+                {idLabel && demo.staffId && staffId !== demo.staffId && (
+                  <button type="button" onClick={() => { setStaffId(demo.staffId); setErr('') }}
+                    className="rounded-full bg-amber-600 px-3 py-1 text-xs font-semibold text-white hover:bg-amber-700">Use demo ID</button>
+                )}
+              </div>
+            )}
             {idLabel ? (
               <Field label={idLabel} error={err} required>
-                {(a) => <Input {...a} value={staffId} onChange={(e) => setStaffId(e.target.value)} autoComplete="off" autoCapitalize="characters" spellCheck={false} maxLength={30} autoFocus />}
+                {(a) => <Input {...a} value={staffId} onChange={(e) => setStaffId(e.target.value)} autoComplete="off" autoCapitalize="characters" spellCheck={false} maxLength={30} autoFocus placeholder={demo?.staffId ? `e.g. ${demo.staffId}` : undefined} />}
               </Field>
             ) : (
               <Field label="NGO" error={err} required>

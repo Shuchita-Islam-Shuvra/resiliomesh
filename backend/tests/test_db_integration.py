@@ -1,10 +1,3 @@
-"""A05 / M04 / A03 against a REAL Supabase Postgres with the migrations applied.
-
-    set TEST_DATABASE_URL=postgresql://postgres:...@db.<ref>.supabase.co:5432/postgres
-    pytest tests/test_db_integration.py -v
-
-Skipped automatically when TEST_DATABASE_URL is not set.
-"""
 import os
 import threading
 import uuid
@@ -25,7 +18,6 @@ def conn():
 
 @pytest.fixture
 def last_pump():
-    """A resource pool with exactly ONE unit left."""
     with conn() as c:
         org = c.execute("select id from organizations limit 1").fetchone()["id"]
         rid = c.execute("""insert into resources(organization_id, resource_type, name, quantity_total, quantity_available, lat, lng)
@@ -84,7 +76,7 @@ def test_same_idempotency_key_concurrently_reserves_once(last_pump):
     threads = [threading.Thread(target=worker) for _ in range(10)]
     [t.start() for t in threads]
     [t.join() for t in threads]
-    assert len(set(out)) == 1                     # all callers get the same allocation
+    assert len(set(out)) == 1
     with conn() as c:
         assert c.execute("select quantity_available q from resources where id=%s", (last_pump,)).fetchone()["q"] == 0
 

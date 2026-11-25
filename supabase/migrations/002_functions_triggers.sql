@@ -1,8 +1,3 @@
--- =====================================================================
--- ResilioMesh — 002 helper functions, triggers, business-rule guards
--- =====================================================================
-
--- ---------- Identity helpers (used by RLS) --------------------------
 create or replace function public.rm_role() returns app_role
 language sql stable security definer set search_path = public as $$
   select role from profiles where id = auth.uid() and is_active
@@ -19,20 +14,17 @@ language sql stable security definer set search_path = public as $$
                    from profiles where id = auth.uid() and is_active), false)
 $$;
 
--- System context = trusted backend connection (no end-user JWT).
 create or replace function public.rm_is_system() returns boolean
 language sql stable as $$
   select auth.uid() is null
      and coalesce(auth.role(), '') not in ('anon','authenticated')
 $$;
 
--- Actor for audit: JWT user, or backend-provided actor via set_config('rm.actor', ...)
 create or replace function public.rm_actor() returns uuid
 language sql stable as $$
   select coalesce(auth.uid(), nullif(current_setting('rm.actor', true), '')::uuid)
 $$;
 
--- ---------- Generic touch / optimistic-lock version bump ------------
 create or replace function public.rm_touch_versioned() returns trigger
 language plpgsql as $$
 begin
@@ -61,8 +53,6 @@ begin
   end loop;
 end $$;
 
--- ---------- New auth user -> profile (always citizen) ---------------
--- Privilege escalation protection: self-registration can never pick a role.
 create or replace function public.handle_new_user() returns trigger
 language plpgsql security definer set search_path = public as $$
 declare v_ward text;
@@ -88,7 +78,6 @@ drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created after insert on auth.users
   for each row execute function public.handle_new_user();
 
--- Only admins (or the backend/system) may change role / org / active flag.
 create or replace function public.rm_guard_profile() returns trigger
 language plpgsql security definer set search_path = public as $$
 begin
@@ -110,7 +99,6 @@ drop trigger if exists trg_guard_profile on profiles;
 create trigger trg_guard_profile before update on profiles
   for each row execute function rm_guard_profile();
 
--- ---------- Incident state machine ----------------------------------
 create or replace function public.rm_incident_transition_allowed(p_from incident_status, p_to incident_status)
 returns boolean language sql immutable as $$
   select case p_from
@@ -120,7 +108,7 @@ returns boolean language sql immutable as $$
     when 'approved'    then p_to in ('in_progress','assessed')
     when 'in_progress' then p_to in ('resolved','assessed')
     when 'duplicate'   then p_to in ('verified')
-    else false            -- resolved / rejected are terminal
+    else false
   end
 $$;
 
@@ -128,7 +116,6 @@ create or replace function public.rm_incident_before_insert() returns trigger
 language plpgsql security definer set search_path = public as $$
 declare v_dup uuid;
 begin
-  -- clients can never forge reporter, status, or AI fields
   if not rm_is_system() then
     new.reporter_id := auth.uid();
     new.status := 'reported';
@@ -136,7 +123,6 @@ begin
     new.verified_by := null; new.duplicate_of := null;
   end if;
 
-  -- Geospatial duplicate detection: same category within 150 m in the last 6 h
   select i.id into v_dup
   from incidents i
   where i.category = new.category
@@ -190,7 +176,6 @@ begin
     if new.status = 'resolved' then new.resolved_at := now(); end if;
   end if;
 
-  -- citizens may only edit text of their own report while it is still 'reported'
   if not rm_is_system()
      and coalesce(current_setting('rm.internal', true), 'off') <> 'on'
      and coalesce(rm_role()::text,'citizen') = 'citizen' then
@@ -224,7 +209,6 @@ drop trigger if exists trg_incident_after_update on incidents;
 create trigger trg_incident_after_update after update on incidents
   for each row execute function rm_incident_after_update();
 
--- ---------- Community-need duplicate detection ----------------------
 create or replace function public.rm_need_before_insert() returns trigger
 language plpgsql security definer set search_path = public as $$
 declare v_dup uuid;
@@ -258,7 +242,6 @@ drop trigger if exists trg_need_before_insert on community_needs;
 create trigger trg_need_before_insert before insert on community_needs
   for each row execute function rm_need_before_insert();
 
--- ---------- Audit logging (append-only) -----------------------------
 create or replace function public.rm_audit() returns trigger
 language plpgsql security definer set search_path = public as $$
 declare v_id text;
@@ -285,7 +268,6 @@ begin
   end loop;
 end $$;
 
--- audit_logs is immutable even for table owners going through the API
 create or replace function public.rm_block_audit_mutation() returns trigger
 language plpgsql as $$
 begin

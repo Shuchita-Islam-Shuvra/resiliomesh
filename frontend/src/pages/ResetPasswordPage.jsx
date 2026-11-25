@@ -6,7 +6,6 @@ import { useAuth } from '../context/AuthContext'
 import { validatePassword } from '../lib/validation'
 import PortalLayout from '../components/PortalLayout'
 
-// Target of the e-mailed reset link: supabase-js turns the link into a short-lived recovery session.
 export default function ResetPasswordPage() {
   const { session, profile, loading, updatePassword } = useAuth()
   const nav = useNavigate()

@@ -1,4 +1,3 @@
-# keep secrets and local build junk out of the image
 **/.env
 **/.env.*
 !**/.env.example

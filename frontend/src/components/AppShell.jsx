@@ -3,7 +3,7 @@ import { NavLink, useLocation, useNavigate, useOutlet } from 'react-router-dom'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
   BarChart3, Boxes, BrainCircuit, ChevronsLeft, ChevronsRight, ClipboardList, CloudRain, HandHeart, LayoutDashboard, LogOut, Map,
-  Menu, ShieldCheck, Smartphone, UserCog, Workflow, X, Wifi, WifiOff,
+  Menu, Plus, ShieldCheck, Smartphone, UserCog, Workflow, X, Wifi, WifiOff,
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
@@ -20,7 +20,8 @@ const SECTIONS = [
   { title: 'Overview', items: [
     { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { to: '/map', label: 'Live Risk Map', icon: Map },
-    { to: '/incidents', label: 'Reports & Assets', icon: ClipboardList },
+    { to: '/incidents', label: 'Reports & Assets', citizenLabel: 'My reports', icon: ClipboardList },
+    { to: '/incidents/new', label: 'Report waterlogging', icon: Plus, roles: ['citizen'] },
   ] },
   { title: 'Intelligence', items: [
     { to: '/risk', label: 'AI Risk Analysis', icon: BrainCircuit, roles: COORD },
@@ -55,14 +56,13 @@ function Clock() {
 }
 
 export default function AppShell() {
-  const { profile, area, signOut } = useAuth()
+  const { profile, area, adminScope, signOut } = useAuth()
   const online = useOnline()
   const toast = useToast()
   const [open, setOpen] = useState(false)
-  // desktop sidebar can collapse to icons; remembered per browser (best effort)
   const [collapsed, setCollapsed] = useState(() => { try { return localStorage.getItem('rm.sidebar') === 'collapsed' } catch { return false } })
   const toggleCollapsed = () => setCollapsed((c) => {
-    try { localStorage.setItem('rm.sidebar', c ? 'open' : 'collapsed') } catch { /* storage blocked */ }
+    try { localStorage.setItem('rm.sidebar', c ? 'open' : 'collapsed') } catch { }
     return !c
   })
   const nav = useNavigate()
@@ -70,19 +70,18 @@ export default function AppShell() {
   const outlet = useOutlet()
   const mainId = 'main'
 
-  // any queued offline reports are flushed as soon as connectivity returns
   useEffect(() => {
     if (!online) return
     flushOutbox(supabase).then((r) => {
       if (r.synced) toast.success(`${r.synced} offline item(s) synced`)
       if (r.failed) toast.error(`${r.failed} offline item(s) were rejected by the server`)
     }).catch(() => {})
-  }, [online]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [online])
 
-  // scroll back to top on navigation (main is the scroll container)
   useEffect(() => { document.getElementById(mainId)?.scrollTo({ top: 0 }) }, [location.pathname])
 
-  const sections = SECTIONS.map((s) => ({ ...s, items: s.items.filter((n) => !n.roles || n.roles.includes(profile?.role)) }))
+  const sections = SECTIONS.map((s) => ({ ...s, items: s.items.filter((n) => !n.roles || n.roles.includes(profile?.role))
+    .map((n) => (profile?.role === 'citizen' && n.citizenLabel ? { ...n, label: n.citizenLabel } : n)) }))
     .filter((s) => s.items.length)
 
   const initials = profile?.full_name?.split(' ').map((p) => p[0]).slice(0, 2).join('')
@@ -119,17 +118,15 @@ export default function AppShell() {
             <ul>
               {s.items.map(({ to, label, icon: Icon }) => (
                 <motion.li key={to} whileTap={{ scale: 0.97 }} transition={{ type: 'spring', stiffness: 500, damping: 15 }}>
-                  <NavLink to={to} onClick={() => setOpen(false)} title={mini ? label : undefined} aria-label={mini ? label : undefined}
+                  <NavLink to={to} end={to === '/incidents'} onClick={() => setOpen(false)} title={mini ? label : undefined} aria-label={mini ? label : undefined}
                     className={({ isActive }) => `group relative flex items-center gap-3.5 overflow-hidden py-3 text-[15px] font-medium outline-offset-[-2px] transition-colors duration-200 ${mini ? 'justify-center px-0' : 'px-6'} ${isActive ? 'text-white delay-150' : 'text-slate-700 delay-100 hover:text-white hover:delay-[60ms] focus-visible:text-white'}`}>
                     {({ isActive }) => (
                       <>
-                        {/* solid block slides from the old item to the new one */}
                         {isActive && (
                           <motion.span layoutId={`nav-block-${layoutGroup}`} aria-hidden
                             className="absolute inset-0 bg-brand-700 shadow-[inset_4px_0_0_0_var(--color-brand-400)]"
                             transition={{ type: 'spring', stiffness: 420, damping: 26 }} />
                         )}
-                        {/* hover: block slides in from the left with a soft edge (see .nav-fill) */}
                         {!isActive && <span aria-hidden className="nav-fill" />}
                         <motion.span className="relative flex" whileTap={{ scale: 0.8 }}
                           animate={isActive ? { scale: [1, 1.2, 1] } : { scale: 1 }}
@@ -189,7 +186,7 @@ export default function AppShell() {
             <div className="flex items-center gap-3 border-l border-slate-200 pl-3">
               <div className="hidden min-w-0 text-center sm:block">
                 <p className="translate-y-[3px] truncate text-base font-bold leading-tight tracking-tight text-slate-900">{profile?.full_name}</p>
-                <span className={`mt-1.5 inline-block whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-semibold leading-none ring-1 ring-inset ${ROLE_TONE[profile?.role] || ''}`}>{ROLE_LABEL[profile?.role]}{(profile?.role === 'city_officer' || area) && ` · ${areaLabel(area)}`}</span>
+                <span className={`mt-1.5 inline-block whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-semibold leading-none ring-1 ring-inset ${ROLE_TONE[profile?.role] || ''}`}>{ROLE_LABEL[profile?.role]}{(profile?.role === 'city_officer' || area) && ` · ${areaLabel(area)}`}{adminScope && ` · ${adminScope === 'owner' ? 'System owner' : 'Security & audit'}`}</span>
               </div>
               <div aria-hidden className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-brand-500 to-brand-700 text-sm font-bold text-white">{initials}</div>
             </div>

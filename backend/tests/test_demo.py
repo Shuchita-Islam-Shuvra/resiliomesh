@@ -1,4 +1,3 @@
-"""Judge demo sign-in (M03 / S03): off by default, private access code, no password leaves the server."""
 import pytest
 
 from app.api import demo
@@ -43,7 +42,7 @@ def test_off_by_default(client_as, monkeypatch):
 def test_wrong_code_is_refused(client_as, demo_on):
     r = client_as(None).post("/api/demo/session", json={"profile": "admin", "code": "guess"})
     assert r.status_code == 403 and r.json()["error"] == "DEMO_CODE"
-    assert demo_on == []                                  # never reached Supabase Auth
+    assert demo_on == []
 
 
 def test_right_code_returns_session_and_second_factor(client_as, demo_on):

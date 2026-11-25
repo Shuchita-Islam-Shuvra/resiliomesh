@@ -1,4 +1,3 @@
-"""M04 rule-based decisions + A02 explainable AI."""
 import pytest
 
 from app.ml.features import FEATURES, clean_features
@@ -36,7 +35,7 @@ def test_missing_and_garbage_features_are_imputed_not_crashing():
                             "impervious_pct": -5})
     assert all(isinstance(v, float) for v in feats.values())
     assert feats["impervious_pct"] == 80.0
-    model().predict({})  # completely empty input still scores
+    model().predict({})
 
 
 @pytest.mark.parametrize("score,level", [(0, "low"), (34.9, "low"), (35, "moderate"), (55, "high"),

@@ -1,11 +1,3 @@
-"""Water Resilience Officer areas (migration 009) against a REAL database.
-
-A Water Resilience Officer of the South authority (DSCC) may only change things in
-Dhaka South wards, and the other way round. Admins stay city-wide. Since
-migration 011 officers also only SEE their own area.
-
-    TEST_DATABASE_URL=postgresql://... pytest tests/test_db_areas.py -v
-"""
 import json
 import os
 import uuid
@@ -43,7 +35,6 @@ def people():
 
 
 def incident(people, area, status="reported", **extra):
-    """System-created incident in a ward of the given area ('DNCC' / 'DSCC')."""
     lat, lng = random_dhaka_point(area)
     with raw() as c:
         ward = nearest_ward(c, lat, lng)
@@ -64,7 +55,6 @@ def verify(uid, inc):
         return c.execute("select transition_incident(%s,'verified',%s) r", (inc["id"], inc["version"])).fetchone()["r"]
 
 
-# ------------------------------------------------------------------ set-up
 def test_authorities_have_their_area():
     with raw() as c:
         rows = {r["id"]: r["city_corporation"] for r in
@@ -83,7 +73,6 @@ def test_area_cannot_be_changed_by_an_admin_once_set(people):
         c.execute("update organizations set city_corporation='DNCC' where id=%s", (SOUTH,))
 
 
-# ------------------------------------------------------------------ incidents
 def test_officer_acts_in_own_area(people):
     inc = incident(people, "DSCC")
     assert verify(people["south"], inc)["ok"] is True
@@ -146,7 +135,6 @@ def test_officer_without_an_area_can_change_nothing(people):
         verify(officer, incident(people, "DSCC"))
 
 
-# ------------------------------------------------------------------ plans, assets
 def plan_for(people, inc):
     with raw() as c:
         return c.execute("""insert into allocation_plans(incident_ids, feasible, assignments, explanation, constraints, created_by)
@@ -181,7 +169,6 @@ def test_officer_adds_assets_only_in_own_area(people):
         add(north_ward)
 
 
-# ------------------------------------------------------------------ backend endpoints (trusted connection)
 @pytest.fixture()
 def backend_db():
     os.environ["DATABASE_URL"] = DSN
@@ -210,7 +197,6 @@ def test_backend_blocks_ai_assessment_and_planning_outside_area(people, backend_
     assert e.value.status_code == 403
 
 
-# ------------------------------------------------------------------ 012: every North / South person
 def test_city_corporation_field_worker_sees_only_own_area(people):
     north_inc, south_inc = incident(people, "DNCC"), incident(people, "DSCC")
     south_worker, ngo_worker = staff("field_worker", SOUTH), staff("field_worker", SHOBAR)
@@ -218,7 +204,7 @@ def test_city_corporation_field_worker_sees_only_own_area(people):
         assert {r["city_corporation"] for r in c.execute("select city_corporation from wards").fetchall()} == {"DSCC"}
         assert c.execute("select id from incidents where id=%s", (north_inc["id"],)).fetchone() is None
         assert c.execute("select id from incidents where id=%s", (south_inc["id"],)).fetchone() is not None
-    with as_user(ngo_worker) as c:                                   # NGO crews stay city-wide
+    with as_user(ngo_worker) as c:
         assert {r["city_corporation"] for r in c.execute("select city_corporation from wards").fetchall()} == {"DNCC", "DSCC"}
 
 
@@ -237,7 +223,7 @@ def test_area_bound_staff_report_only_in_own_area(people):
     with pytest.raises(psycopg.errors.InsufficientPrivilege):
         with as_user(people["south"]) as c:
             _report(c, "DNCC")
-    with as_user(people["admin"]) as c:                               # admins anywhere
+    with as_user(people["admin"]) as c:
         _report(c, "DNCC")
 
 

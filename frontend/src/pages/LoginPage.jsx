@@ -11,7 +11,6 @@ import { ROLE_BY_KEY, roleOrDefault } from '../lib/roles'
 import { supabase } from '../lib/supabase'
 import { SIGNIN_ID_LABEL, validateEmail, validateSignIn } from '../lib/validation'
 
-// Demo accounts for judges: email + the role's extra sign-in identifier.
 const DEMO = {
   citizen: { email: 'citizen@resiliomesh.demo' },
   city_officer: { email: 'officer@resiliomesh.demo', employee_id: 'DSCC-OFF-01' },
@@ -19,16 +18,14 @@ const DEMO = {
   field_worker: { email: 'field1@resiliomesh.demo', employee_id: 'FW-001' },
   admin: { email: 'admin@resiliomesh.demo', employee_id: 'ADM-001' },
 }
-// second admin: staff / admin grants need two different administrators
 const DEMO_ADMIN2 = { email: 'admin2@resiliomesh.demo', employee_id: 'ADM-002' }
 const ID_PLACEHOLDER = { city_officer: 'e.g. DSCC-OFF-01', field_worker: 'e.g. FW-001', admin: 'e.g. ADM-001' }
 
-// Client-side brute-force brake (Supabase also rate-limits server-side).
 const MAX_FAILS = 5
 const LOCK_MS = 30_000
 const LOCK_KEY = 'rm_login_lock'
 const readLock = () => { try { return JSON.parse(sessionStorage.getItem(LOCK_KEY)) || { fails: 0, until: 0 } } catch { return { fails: 0, until: 0 } } }
-const writeLock = (v) => { try { sessionStorage.setItem(LOCK_KEY, JSON.stringify(v)) } catch { /* private mode */ } }
+const writeLock = (v) => { try { sessionStorage.setItem(LOCK_KEY, JSON.stringify(v)) } catch { } }
 
 const EMPTY = { email: '', password: '', employee_id: '', organization_id: '' }
 
@@ -37,20 +34,19 @@ export default function LoginPage() {
   const nav = useNavigate()
   const loc = useLocation()
   const [params, setParams] = useSearchParams()
-  const role = roleOrDefault(params.get('role'))
+  const role = roleOrDefault(params.get('role'), 'admin')
   const R = ROLE_BY_KEY[role]
   const idLabel = SIGNIN_ID_LABEL[role]
 
-  const [mode, setMode] = useState('signin')          // 'signin' | 'forgot'
+  const [mode, setMode] = useState('signin')
   const [v, setV] = useState(EMPTY)
   const [orgs, setOrgs] = useState([])
   const [errors, setErrors] = useState({})
-  const [formError, setFormError] = useState(null)    // { text, tone, action? }
+  const [formError, setFormError] = useState(null)
   const [busy, setBusy] = useState(false)
   const [lockLeft, setLockLeft] = useState(0)
-  // judge demo picker: null = still asking the server (picker shown meanwhile), false = demo mode off
   const [demoOn, setDemoOn] = useState(null)
-  const [codeRequired, setCodeRequired] = useState(false)   // server decides (DEMO_ACCESS_CODE set or not)
+  const [codeRequired, setCodeRequired] = useState(false)
 
   useEffect(() => {
     const tick = () => setLockLeft(Math.max(0, Math.ceil((readLock().until - Date.now()) / 1000)))
@@ -59,15 +55,13 @@ export default function LoginPage() {
     return () => clearInterval(t)
   }, [])
   useEffect(() => { supabase.rpc('rm_public_organizations').then(({ data }) => setOrgs(data || [])) }, [])
-  // also wakes a sleeping free-tier server while the judge reads the page
   useEffect(() => {
     let live = true
-    api('/api/demo', { timeoutMs: 90000 }).then((r) => { if (live) { setDemoOn(Boolean(r.enabled)); setCodeRequired(Boolean(r.code_required)) } }).catch((e) => { if (live && e.code === 'NO_API') setDemoOn(false) /* else unknown (server waking up): keep the buttons */ })
+    api('/api/demo', { timeoutMs: 90000 }).then((r) => { if (live) { setDemoOn(Boolean(r.enabled)); setCodeRequired(Boolean(r.code_required)) } }).catch((e) => { if (live && e.code === 'NO_API') setDemoOn(false) })
     return () => { live = false }
   }, [])
   const ngos = useMemo(() => orgs.filter((o) => o.type === 'ngo'), [orgs])
 
-  // while signInAs verifies the role the session briefly exists — don't redirect mid-check
   if (session && !busy) return <Navigate to={loc.state?.from || '/dashboard'} replace />
 
   const set = (k) => (e) => {
@@ -114,7 +108,6 @@ export default function LoginPage() {
           action: actual && { label: `Sign in as ${actual.label}`, run: () => setRole(actual.key) },
         })
       } else if (err.code === 'ID_MISMATCH') {
-        // the server counts wrong IDs per account and locks it (cannot be reset from the browser)
         if (err.attemptsLeft != null) setFormError({ tone: 'error', text: `Incorrect ${idLabel || 'NGO'} for this account. ${err.attemptsLeft} attempt${err.attemptsLeft === 1 ? '' : 's'} left before the account is locked for a while.` })
         else countFail(`Incorrect email, password or ${idLabel || 'NGO'}.`)
       } else if (err.code === 'LOCKED') {
@@ -148,7 +141,6 @@ export default function LoginPage() {
     } catch (err) {
       if (/rate limit|too many/i.test(err.message)) { setFormError({ tone: 'error', text: 'Too many reset requests. Please wait a few minutes.' }); setBusy(false); return }
     }
-    // same message whether or not the account exists (no account enumeration)
     setFormError({ tone: 'success', text: 'If an account exists for this email, a password reset link is on its way.' })
     setBusy(false)
   }
@@ -249,7 +241,7 @@ export default function LoginPage() {
         {role === 'admin' && (
           <button type="button" className="mt-1 block text-left text-brand-700 hover:underline"
             onClick={() => setV((cur) => ({ ...cur, email: DEMO_ADMIN2.email, employee_id: DEMO_ADMIN2.employee_id }))}>
-            Fill {DEMO_ADMIN2.email} · {DEMO_ADMIN2.employee_id} <span className="text-xs text-slate-500">(second approver)</span>
+            Fill {DEMO_ADMIN2.email} · {DEMO_ADMIN2.employee_id} <span className="text-xs text-slate-500">(security &amp; audit officer, second approver)</span>
           </button>
         )}
       </details>)}

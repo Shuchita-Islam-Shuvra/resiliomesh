@@ -1,4 +1,3 @@
-"""Translate Postgres business-rule exceptions into clean HTTP errors."""
 from __future__ import annotations
 
 import logging

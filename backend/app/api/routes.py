@@ -1,5 +1,3 @@
-"""HTTP API. Simple CRUD goes straight from the browser to Supabase (RLS-protected);
-this service hosts the AI, optimisation, external-API, workflow and bulk-import logic."""
 from __future__ import annotations
 
 import time
@@ -10,7 +8,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from ..core import db
 from ..core.areas import assert_ward_visible
-from ..core.auth import OFFICERS, STAFF, CurrentUser, get_current_user, require_roles
+from ..core.auth import OFFICERS, STAFF, CurrentUser, get_current_user, require_roles, require_system_owner
 from ..core.errors import AppError
 from ..ml.features import FEATURE_LABELS, FEATURES
 from ..services import importer, planning, risk
@@ -21,19 +19,17 @@ from ..workflow import worker
 router = APIRouter(prefix="/api")
 
 
-# ------------------------------------------------------------------ me
 @router.get("/me")
 def me(user: CurrentUser = Depends(get_current_user)):
     return user.__dict__
 
 
-# ------------------------------------------------------------------ weather (A06)
 @router.get("/weather/wards/{ward_id}")
 def ward_weather(ward_id: str, refresh: bool = False, user: CurrentUser = Depends(get_current_user)):
     with db.tx() as conn:
         w = db.fetch_one(conn, "select id, name, lat, lng from wards where id = %s", (ward_id,))
         if w:
-            assert_ward_visible(conn, user, ward_id)          # North / South staff: own area only
+            assert_ward_visible(conn, user, ward_id)
     if not w:
         raise AppError(404, "NOT_FOUND", "Unknown ward")
     data = get_weather_client().get(w["id"], w["lat"], w["lng"], force_live=refresh and user.role != "citizen")
@@ -52,7 +48,7 @@ class ChaosIn(BaseModel):
 
 
 @router.post("/admin/chaos")
-def set_chaos(body: ChaosIn, user: CurrentUser = Depends(require_roles("admin"))):
+def set_chaos(body: ChaosIn, user: CurrentUser = Depends(require_system_owner)):
     c = get_weather_client()
     c.chaos_mode = body.weather_mode
     if body.weather_mode == "normal":
@@ -60,7 +56,6 @@ def set_chaos(body: ChaosIn, user: CurrentUser = Depends(require_roles("admin"))
     return {"weather_mode": c.chaos_mode, "breaker": c.breaker.state}
 
 
-# ------------------------------------------------------------------ AI risk (A02)
 @router.post("/risk/incidents/{incident_id}/assess")
 def assess(incident_id: str, user: CurrentUser = Depends(require_roles("city_officer", "admin"))):
     return risk.assess_incident(incident_id, user)
@@ -94,7 +89,6 @@ def model_info(user: CurrentUser = Depends(require_roles(*STAFF))):
                                   for f in FEATURES], key=lambda d: -d["gain_pct"])}
 
 
-# ------------------------------------------------------------------ optimisation (A02)
 class ConstraintsIn(BaseModel):
     max_distance_km: float = Field(10.0, description="Response radius")
     reserve_ratio: float = Field(0.0, description="Fraction of each stock kept in reserve")
@@ -135,7 +129,6 @@ def optimize_plan(body: OptimizeIn, idempotency_key: str | None = Header(default
     return out
 
 
-# ------------------------------------------------------------------ workflow (A07)
 @router.get("/workflows/worker")
 def worker_status(user: CurrentUser = Depends(require_roles(*OFFICERS))):
     return worker.status
@@ -143,7 +136,6 @@ def worker_status(user: CurrentUser = Depends(require_roles(*OFFICERS))):
 
 @router.post("/workflows/process-now")
 def process_now(user: CurrentUser = Depends(require_roles(*OFFICERS))):
-    """Drain the queue synchronously (useful on free hosting where the worker may sleep)."""
     from ..workflow.engine import WorkflowEngine
     from ..workflow.pg_store import PgStore
     engine, results = WorkflowEngine(PgStore()), []
@@ -155,7 +147,6 @@ def process_now(user: CurrentUser = Depends(require_roles(*OFFICERS))):
     return {"processed": len(results), "results": results}
 
 
-# ------------------------------------------------------------------ analytics import (A08)
 @router.post("/analytics/import")
 async def import_history(file: UploadFile = File(...), user: CurrentUser = Depends(require_roles("admin", "city_officer"))):
     if not (file.filename or "").lower().endswith(".csv"):
@@ -169,7 +160,6 @@ async def import_history(file: UploadFile = File(...), user: CurrentUser = Depen
         raise AppError(422, "VALIDATION", str(exc))
 
 
-# ------------------------------------------------------------------ admin health
 @router.get("/admin/health")
 def admin_health(user: CurrentUser = Depends(require_roles("admin"))):
     t0 = time.perf_counter()

@@ -27,8 +27,13 @@ Run these files **one at a time, in this order**. Paste the content and click **
 | 15 | `supabase/migrations/014_ngo_coordinator_areas.sql` | NGO coordinators get a home area (Dhaka North / South) from their main operating ward and are responsible for needs there. The other area's coordinators can help when backup is asked for one need (`request_ngo_backup`) or the whole area (`set_ngo_area_backup`), or when an area has no coordinator. `ngo_area_status()` for the NGO screen. Changing a coordinator's area is admin-only. |
 | 16 | `supabase/migrations/015_split_officer_ngo_duties.sql` | Separates the two jobs: only Water Resilience Officers (own area) and admins approve, reject or retry pump & crew plans. NGO coordinators keep read access to reports and handle relief on the NGO page. |
 | 17 | `supabase/migrations/016_split_stock_by_role.sql` | Splits the STOCK by role: NGO coordinators see and edit only their own NGO's stock and cannot register pumps or crews; officers see city-authority equipment (own authority + authority stock in their area), not NGO relief stock. The officers' optimiser also plans with authority equipment only; relief kits / medical kits for people go to NGO coordinators. |
+| 18 | `supabase/migrations/017_incident_is_closed.sql` | `incidents.is_closed`, so lists rank open reports ahead of resolved / rejected / duplicate ones |
+| 19 | `supabase/migrations/018_allocate_only_verified.sql` | Relief stock can only be reserved for a need whose linked report an officer has verified |
+| 20 | `supabase/migrations/019_field_crews.sql` | Field crews: a task gets a crew sized to the job with one lead, picked by team, area, duty and workload; on/off duty; decline with automatic replacement; officers set crews; GPS at start and finish |
+| 21 | `supabase/migrations/020_field_failure_after_accept.sql` | A field worker can report a problem after accepting, without a fake "start work" |
+| 22 | `supabase/migrations/021_admin_duties.sql` | Two admins, two jobs: the **system owner** sets the platform up (roster, NGOAB registry, official domains, fault injection); the **access reviewer** reviews access, audits and revokes. Both approve access (two-person rule). New admins start as reviewer; only the platform team (SQL) changes a duty |
 
-Shortcut: run `001_schema.sql`, then `supabase/run_after_001.sql` (files 2–17 in one script).
+Shortcut: run `001_schema.sql`, then `supabase/run_after_001.sql` (files 2–17 in one script), then 017–021 one by one.
 
 All files can be re-run safely (they are idempotent). If you ever re-run `003_rls.sql`, run 006–016 again afterwards (003 resets every policy). If you re-run `004_rpc.sql`, run 009, 011, 012 and 015 again. If you re-run `008`, run 010 again.
 
@@ -95,14 +100,21 @@ This creates 10 accounts and assigns their roles and organisations:
 
 | Email | Role |
 |---|---|
-| admin@resiliomesh.demo · ADM-001 | System Admin |
-| admin2@resiliomesh.demo · ADM-002 | System Admin: the second approver for the two-admin rule |
+| admin@resiliomesh.demo · ADM-001 | System Admin · **System owner**: platform set-up (roster, NGOAB registry, official domains, fault injection) |
+| admin2@resiliomesh.demo · ADM-002 | System Admin · **Security & audit officer**: reviews access and the audit log, the second approver for the two-admin rule; cannot change platform set-up |
 | officer@resiliomesh.demo / officer2@… | Water Resilience Officer (Dhaka South / Dhaka North) |
 | ngo@resiliomesh.demo / ngo2@… | NGO Coordinator (Dhaka South / Dhaka North) |
-| field1@ / field2@ / field3@resiliomesh.demo | Field Worker |
+| field1@ … field7@resiliomesh.demo · FW-001 … FW-007 | Field Worker (drainage, pump, relief and medical teams, both areas) |
 | citizen@ / citizen2@resiliomesh.demo | Citizen |
 
-It also inserts 18 realistic incidents in different states and 6 community needs. One need is a deliberate duplicate, and the database flags it automatically.
+It also inserts 18 realistic incidents in different states and 6 community needs. One need is a deliberate duplicate, and the database flags it automatically. Re-running the seed is safe: it resets the demo passwords, puts every demo field worker back on duty and skips the sample data that already exists.
+
+### Put real work on the field crews (optional, before a demo)
+The seed creates reports but no field tasks, so the Field Portal starts empty. With the backend running:
+```powershell
+python ..\scripts\demo_dispatch.py            # add --api https://<your-api>.onrender.com for the live backend
+```
+It signs in as the two demo officers and runs the real pipeline for up to 2 assessed reports per area: AI assessment if missing → optimiser plan → approval → dispatch workflow. The script prints every task with its crew (lead marked). Crews are sized to the job, so some tasks start short-staffed and show up in the officer's **Field crews need attention** list.
 
 > Self-registration always creates a **Citizen**. Staff roles are granted only through **Admin → Access requests**. Water Resilience Officer and Admin grants, and any request that fails a check (not on the roster, wrong e-mail domain, unknown NGOAB number), need **two different admins**. The database enforces all of this.
 

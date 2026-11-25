@@ -1,6 +1,3 @@
--- Relief stock may only be reserved for a need whose linked report has been verified by an officer.
--- An unverified ("reported") report could be fake or a duplicate; reserving stock for it would waste relief.
--- Same as 014's allocate_to_need plus one guard.
 create or replace function public.allocate_to_need(
   p_need_id uuid, p_resource_id uuid, p_qty integer, p_idempotency_key text
 ) returns jsonb

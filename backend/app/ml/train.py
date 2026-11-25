@@ -1,4 +1,3 @@
-"""Train and persist the risk model:  python -m app.ml.train"""
 from __future__ import annotations
 
 import json

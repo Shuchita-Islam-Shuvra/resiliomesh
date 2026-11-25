@@ -37,9 +37,8 @@ function IncidentsTab() {
   const [rows, setRows] = useState(null)
   const [total, setTotal] = useState(0)
   const [wards, setWards] = useState([])
-  // Officers and city-corporation crews see only their own area (Dhaka North / South); the database enforces it (011 / 012)
   const [f, setF] = useState({ q: '', status: '', category: '', risk: '', ward: '', area: area || '' })
-  const [sort, setSort] = useState({ field: 'risk_score', dir: 'desc' }) // most dangerous first: critical, high, moderate, low, then unassessed
+  const [sort, setSort] = useState({ field: 'risk_score', dir: 'desc' })
   const [page, setPage] = useState(1)
   const [err, setErr] = useState('')
 
@@ -62,7 +61,7 @@ function IncidentsTab() {
   }, [f, sort, page])
 
   const debounced = useDebouncedCallback(load, 300)
-  useEffect(() => { debounced() }, [f, sort, page]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { debounced() }, [f, sort, page])
   useRealtime('incidents', useDebouncedCallback(load, 800))
 
   const onSort = (field) => setSort((s) => ({ field, dir: s.field === field && s.dir === 'desc' ? 'asc' : 'desc' }))
@@ -148,7 +147,6 @@ function AssetsTab() {
   const [conflict, setConflict] = useState(null)
   const [busy, setBusy] = useState(false)
   const canEdit = hasRole('city_officer', 'admin')
-  // officers edit their own authority's assets in their own area; admins everything
   const canEditAsset = (a) => hasRole('admin') || (canManageArea(a.wards?.city_corporation) && a.owner_org_id === profile?.organization_id)
 
   const load = useCallback(async () => {
@@ -182,7 +180,6 @@ function AssetsTab() {
     }
     try {
       if (edit.id) {
-        // optimistic locking: only update if nobody changed it since we loaded it
         const { data, error } = await supabase.from('drainage_assets').update(payload).eq('id', edit.id).eq('version', edit.version).select()
         if (error) throw error
         if (!data.length) {
