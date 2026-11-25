@@ -180,6 +180,7 @@ def test_ngo_allocation_lifecycle_cancel_returns_stock_and_deliver_keeps_it(user
                             values ('DSCC-10','relief_kit',6,6,'x',%s) returning id""", (str(uuid.uuid4()),)).fetchone()["id"]
     with as_user(users["ngo"]) as c:
         a1 = c.execute("select allocate_to_need(%s,%s,4,%s) r", (need, rid, str(uuid.uuid4()))).fetchone()["r"]["allocation"]["id"]
+    with as_user(users["ngo"]) as c:
         with pytest.raises(psycopg.Error, match="INVALID_STATE"):
             c.execute("select cancel_need(%s,null)", (need,))
     with as_user(users["ngo"]) as c:
@@ -193,6 +194,7 @@ def test_ngo_allocation_lifecycle_cancel_returns_stock_and_deliver_keeps_it(user
         a2 = c.execute("select allocate_to_need(%s,%s,6,%s) r", (need, rid, str(uuid.uuid4()))).fetchone()["r"]["allocation"]["id"]
         c.execute("select ngo_update_allocation(%s,'dispatch')", (a2,))
         c.execute("select ngo_update_allocation(%s,'deliver')", (a2,))
+    with as_user(users["ngo"]) as c:
         with pytest.raises(psycopg.Error, match="INVALID_STATE"):
             c.execute("select ngo_update_allocation(%s,'cancel')", (a2,))
     with raw() as c:
@@ -470,6 +472,7 @@ def test_ngo_coordinator_cannot_approve_or_reject_pump_and_crew_plans(users, pum
 def test_ngo_relief_is_not_auto_delivered_when_the_report_is_resolved(users):
     inc = new_incident(users["citizen"])
     with raw() as c:
+        c.execute("update incidents set status='verified' where id=%s", (inc["id"],))
         rid = c.execute("""insert into resources(organization_id, resource_type, name, quantity_total, quantity_available, lat, lng)
                            values (%s,'relief_kit',%s,5,5,23.74,90.37) returning id""", (SHOBAR, f"link kits {uuid.uuid4()}")).fetchone()["id"]
         ward = c.execute("select ward_id from incidents where id=%s", (inc["id"],)).fetchone()["ward_id"]
