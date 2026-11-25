@@ -23,10 +23,14 @@ Run these files **one at a time, in this order**. Paste the content and click **
 | 11 | `supabase/migrations/010_one_ngo_per_coordinator.sql` | One person, one NGO Coordinator post. NGO Coordinators work city-wide (no North/South split). A mobile number that holds an active NGO Coordinator post cannot be used by any other active staff account, and moving a coordinator to another NGO is a two-admin transfer. |
 | 12 | `supabase/migrations/011_officer_area_view.sql` | Officers SEE only their own area too: a Dhaka South officer's wards, reports, assets, risk, plans, tasks, workflows, analytics and map are all Dhaka South (their own reports and their authority's own stock stay visible). Admins, NGOs and field workers unchanged. |
 | 13 | `supabase/migrations/012_area_bound_staff.sql` | North / South everywhere: field workers of a city corporation are bound to its area like officers (NGO crews stay city-wide). Area-bound staff see only their area (incl. ward weather) and can file reports / log needs only there; a place belongs to the area of its nearest ward centre. Field tasks go only to crews of the incident's area or NGO crews. Adds public `ward_areas()` for map shading. |
+| 14 | `supabase/migrations/013_ngo_allocation_lifecycle.sql` | NGO coordinator aid lifecycle: `ngo_update_allocation()` (dispatch, mark delivered, cancel and return stock) and `cancel_need()`; coordinators can edit only their own or unclaimed needs. |
+| 15 | `supabase/migrations/014_ngo_coordinator_areas.sql` | NGO coordinators get a home area (Dhaka North / South) from their main operating ward and are responsible for needs there. The other area's coordinators can help when backup is asked for one need (`request_ngo_backup`) or the whole area (`set_ngo_area_backup`), or when an area has no coordinator. `ngo_area_status()` for the NGO screen. Changing a coordinator's area is admin-only. |
+| 16 | `supabase/migrations/015_split_officer_ngo_duties.sql` | Separates the two jobs: only Water Resilience Officers (own area) and admins approve, reject or retry pump & crew plans. NGO coordinators keep read access to reports and handle relief on the NGO page. |
+| 17 | `supabase/migrations/016_split_stock_by_role.sql` | Splits the STOCK by role: NGO coordinators see and edit only their own NGO's stock and cannot register pumps or crews; officers see city-authority equipment (own authority + authority stock in their area), not NGO relief stock. The officers' optimiser also plans with authority equipment only; relief kits / medical kits for people go to NGO coordinators. |
 
-Shortcut: run `001_schema.sql`, then `supabase/run_after_001.sql` (files 2–13 in one script).
+Shortcut: run `001_schema.sql`, then `supabase/run_after_001.sql` (files 2–17 in one script).
 
-All files can be re-run safely (they are idempotent). If you ever re-run `003_rls.sql`, run 006–012 again afterwards (003 resets every policy). If you re-run `004_rpc.sql`, run 009, 011 and 012 again. If you re-run `008`, run 010 again.
+All files can be re-run safely (they are idempotent). If you ever re-run `003_rls.sql`, run 006–016 again afterwards (003 resets every policy). If you re-run `004_rpc.sql`, run 009, 011, 012 and 015 again. If you re-run `008`, run 010 again.
 
 Check that it worked:
 ```sql
@@ -94,7 +98,7 @@ This creates 10 accounts and assigns their roles and organisations:
 | admin@resiliomesh.demo · ADM-001 | System Admin |
 | admin2@resiliomesh.demo · ADM-002 | System Admin: the second approver for the two-admin rule |
 | officer@resiliomesh.demo / officer2@… | Water Resilience Officer (Dhaka South / Dhaka North) |
-| ngo@resiliomesh.demo / ngo2@… | NGO Coordinator |
+| ngo@resiliomesh.demo / ngo2@… | NGO Coordinator (Dhaka South / Dhaka North) |
 | field1@ / field2@ / field3@resiliomesh.demo | Field Worker |
 | citizen@ / citizen2@resiliomesh.demo | Citizen |
 

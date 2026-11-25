@@ -14,14 +14,19 @@ import { validateResource } from '../lib/validation'
 
 export default function ResourcesPage() {
   const [params, setParams] = useSearchParams()
-  const tab = params.get('tab') || 'inventory'
+  const { hasRole } = useAuth()
+  const planner = hasRole('city_officer', 'admin')   // pump & crew plans are the officers' job (015)
+  const asked = params.get('tab') || 'inventory'
+  const tab = asked === 'plans' && !planner ? 'inventory' : asked
   return (
     <>
-      <PageHeader title="Resource inventory & allocation" description="Inventory is organisation-scoped. The optimiser proposes allocations; a coordinator approves; the workflow reserves stock atomically and dispatches teams." />
+      <PageHeader title="Resource inventory & allocation" description={planner
+        ? "Inventory is organisation-scoped. The optimiser proposes allocations; a Water Resilience Officer approves; the workflow reserves stock atomically and dispatches teams."
+        : "Your organisation's relief stock. Allocate it to community needs on the NGO page."} />
       <Tabs value={tab} onChange={(t) => setParams({ tab: t })} tabs={[
-        { value: 'inventory', label: 'Inventory' }, { value: 'plans', label: 'Optimise & approve' }, { value: 'allocations', label: 'Allocations' }]} />
+        { value: 'inventory', label: 'Inventory' }, ...(planner ? [{ value: 'plans', label: 'Optimise & approve' }] : []), { value: 'allocations', label: 'Allocations' }]} />
       {tab === 'inventory' && <Inventory />}
-      {tab === 'plans' && <Plans preselect={params.get('incident')} />}
+      {tab === 'plans' && planner && <Plans preselect={params.get('incident')} />}
       {tab === 'allocations' && <Allocations />}
     </>
   )
@@ -43,12 +48,20 @@ function Inventory() {
     const { data } = await supabase.from('resources').select('*, organizations(name,type)').order('resource_type').order('name')
     setRows(data || [])
   }, [])
-  useEffect(() => { load(); supabase.from('organizations').select('id,name').then(({ data }) => setOrgs(data || [])) }, [load])
+  useEffect(() => { load(); supabase.from('organizations').select('id,name,type').then(({ data }) => setOrgs(data || [])) }, [load])
   useRealtime('resources', useDebouncedCallback(load, 500))
 
-  const shown = useMemo(() => (rows || []).filter((r) =>
+  // Each role sees its own kind of stock (migration 016 enforces the same in the database):
+  // NGO coordinator = own NGO's relief stock, officer = city-authority equipment, admin = all.
+  const isNgo = hasRole('ngo_coordinator')
+  const isOfficer = hasRole('city_officer')
+  const mine = useCallback((r) => isNgo ? r.organization_id === profile.organization_id
+    : isOfficer ? r.organization_id === profile.organization_id || r.organizations?.type === 'city_authority'
+    : true, [isNgo, isOfficer, profile.organization_id])
+  const types = Object.entries(RESOURCE_LABEL).filter(([k]) => !isNgo || !['pump', 'crew'].includes(k))
+  const shown = useMemo(() => (rows || []).filter((r) => mine(r) &&
     (!filter.type || r.resource_type === filter.type) && (!filter.org || r.organization_id === filter.org) &&
-    (!filter.q || r.name.toLowerCase().includes(filter.q.toLowerCase()))), [rows, filter])
+    (!filter.q || r.name.toLowerCase().includes(filter.q.toLowerCase()))), [rows, filter, mine])
   const totals = useMemo(() => {
     const t = {}
     for (const r of shown) { t[r.resource_type] ??= { total: 0, avail: 0 }; t[r.resource_type].total += r.quantity_total; t[r.resource_type].avail += r.quantity_available }
@@ -91,12 +104,15 @@ function Inventory() {
           </div>
         ))}
       </div>
-      <Card bodyClass="p-0" title="Stock by organisation" actions={hasRole('ngo_coordinator', 'city_officer', 'admin') &&
+      <Card bodyClass="p-0"
+        title={isNgo ? 'Our relief stock' : isOfficer ? 'City authority equipment' : 'Stock by organisation'}
+        subtitle={isNgo ? 'Only your NGO sees and manages this. Pumps and crews belong to the city authorities.' : isOfficer ? 'Pumps, crews and other equipment of the drainage authorities. NGO relief stock is managed by NGO coordinators.' : undefined}
+        actions={hasRole('ngo_coordinator', 'city_officer', 'admin') &&
         <Button size="sm" onClick={() => { setErrors({}); setEdit({ name: '', resource_type: 'relief_kit', unit: 'kit', quantity_total: 0, quantity_available: 0, lat: 23.75, lng: 90.39, organization_id: profile.organization_id || '' }) }}><Plus className="h-4 w-4" />Add stock</Button>}>
         <div className="flex flex-wrap gap-2 border-b border-slate-100 p-4">
           <Input aria-label="Search inventory" className="max-w-xs" placeholder="Search…" value={filter.q} onChange={(e) => setFilter({ ...filter, q: e.target.value })} />
-          <Select aria-label="Filter by type" className="max-w-[200px]" value={filter.type} onChange={(e) => setFilter({ ...filter, type: e.target.value })}><option value="">All types</option>{Object.entries(RESOURCE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</Select>
-          <Select aria-label="Filter by organisation" className="max-w-[260px]" value={filter.org} onChange={(e) => setFilter({ ...filter, org: e.target.value })}><option value="">All organisations</option>{orgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}</Select>
+          <Select aria-label="Filter by type" className="max-w-[200px]" value={filter.type} onChange={(e) => setFilter({ ...filter, type: e.target.value })}><option value="">All types</option>{types.map(([k, v]) => <option key={k} value={k}>{v}</option>)}</Select>
+          {!isNgo && <Select aria-label="Filter by organisation" className="max-w-[260px]" value={filter.org} onChange={(e) => setFilter({ ...filter, org: e.target.value })}><option value="">All organisations</option>{orgs.filter((o) => !isOfficer || o.type === 'city_authority').map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}</Select>}
         </div>
         <div className="overflow-x-auto">
           <table className="min-w-full text-sm">
@@ -127,7 +143,7 @@ function Inventory() {
         {edit && (
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Name" error={errors.name} required className="sm:col-span-2">{(a) => <Input {...a} value={edit.name} onChange={s('name')} />}</Field>
-            <Field label="Type" error={errors.resource_type}>{(a) => <Select {...a} value={edit.resource_type} onChange={s('resource_type')} disabled={Boolean(edit.id)}>{Object.entries(RESOURCE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</Select>}</Field>
+            <Field label="Type" error={errors.resource_type}>{(a) => <Select {...a} value={edit.resource_type} onChange={s('resource_type')} disabled={Boolean(edit.id)}>{(edit.id ? Object.entries(RESOURCE_LABEL) : types).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</Select>}</Field>
             <Field label="Unit">{(a) => <Input {...a} value={edit.unit} onChange={s('unit')} />}</Field>
             <Field label="Total" error={errors.quantity_total} required>{(a) => <Input {...a} type="number" min={0} value={edit.quantity_total} onChange={s('quantity_total')} />}</Field>
             <Field label="Available" error={errors.quantity_available} required hint="Cannot exceed total">{(a) => <Input {...a} type="number" min={0} value={edit.quantity_available} onChange={s('quantity_available')} />}</Field>
@@ -315,11 +331,15 @@ function PlanResult({ out }) {
 
 // ---------------------------------------------------------------- allocations
 function Allocations() {
+  const { profile, hasRole } = useAuth()
+  const isNgo = hasRole('ngo_coordinator')
   const [rows, setRows] = useState(null)
   const load = useCallback(async () => {
-    const { data } = await supabase.from('allocations').select('*, resources(name,resource_type), incidents(reference_code), community_needs(id,need_type)').order('created_at', { ascending: false }).limit(100)
+    let q = supabase.from('allocations').select('*, resources!inner(name,resource_type,organization_id), incidents(reference_code), community_needs(id,need_type)').order('created_at', { ascending: false }).limit(100)
+    if (isNgo) q = q.eq('resources.organization_id', profile.organization_id)
+    const { data } = await q
     setRows(data || [])
-  }, [])
+  }, [isNgo, profile.organization_id])
   useEffect(() => { load() }, [load])
   useRealtime('allocations', useDebouncedCallback(load, 500))
   if (!rows) return <Spinner />

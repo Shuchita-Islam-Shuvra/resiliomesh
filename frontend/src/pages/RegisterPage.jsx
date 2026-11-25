@@ -210,7 +210,7 @@ export default function RegisterPage() {
               </>
             )}
             <Field label="Designation" error={errors.designation} required>{(a) => <Input {...a} value={v.designation} onChange={set('designation')} placeholder="Relief Coordinator" maxLength={80} />}</Field>
-            {wardSelect('Main operating area', true)}
+            {wardSelect('Main operating area', true, 'Sets your home area (Dhaka North or South): you are responsible for needs there')}
           </fieldset>
         )}
 

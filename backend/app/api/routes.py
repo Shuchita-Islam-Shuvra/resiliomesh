@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from ..core import db
 from ..core.areas import assert_ward_visible
-from ..core.auth import COORDINATORS, STAFF, CurrentUser, get_current_user, require_roles
+from ..core.auth import OFFICERS, STAFF, CurrentUser, get_current_user, require_roles
 from ..core.errors import AppError
 from ..ml.features import FEATURE_LABELS, FEATURES
 from ..services import importer, planning, risk
@@ -123,7 +123,7 @@ _idem_cache: dict[str, tuple[float, dict]] = {}
 
 @router.post("/plans/optimize")
 def optimize_plan(body: OptimizeIn, idempotency_key: str | None = Header(default=None),
-                  user: CurrentUser = Depends(require_roles(*COORDINATORS))):
+                  user: CurrentUser = Depends(require_roles(*OFFICERS))):
     if idempotency_key:
         hit = _idem_cache.get(f"{user.id}:{idempotency_key}")
         if hit and time.time() - hit[0] < 600:
@@ -137,12 +137,12 @@ def optimize_plan(body: OptimizeIn, idempotency_key: str | None = Header(default
 
 # ------------------------------------------------------------------ workflow (A07)
 @router.get("/workflows/worker")
-def worker_status(user: CurrentUser = Depends(require_roles(*COORDINATORS))):
+def worker_status(user: CurrentUser = Depends(require_roles(*OFFICERS))):
     return worker.status
 
 
 @router.post("/workflows/process-now")
-def process_now(user: CurrentUser = Depends(require_roles(*COORDINATORS))):
+def process_now(user: CurrentUser = Depends(require_roles(*OFFICERS))):
     """Drain the queue synchronously (useful on free hosting where the worker may sleep)."""
     from ..workflow.engine import WorkflowEngine
     from ..workflow.pg_store import PgStore

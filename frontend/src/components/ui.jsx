@@ -149,14 +149,17 @@ export const Select = ({ children, ...p }) => <select {...p} className={`${input
 
 export function Modal({ open, onClose, title, children, footer, wide, plain }) {
   const ref = useRef()
+  // keep the latest onClose in a ref so inline callbacks don't re-run the effect (which re-stole focus on every keystroke)
+  const closeRef = useRef(onClose)
+  closeRef.current = onClose
   useEffect(() => {
     if (!open) return
     const prev = document.activeElement
     ref.current?.querySelector('input,select,textarea,button')?.focus()
-    const onKey = (e) => e.key === 'Escape' && onClose?.()
+    const onKey = (e) => e.key === 'Escape' && closeRef.current?.()
     document.addEventListener('keydown', onKey)
     return () => { document.removeEventListener('keydown', onKey); prev?.focus?.() }
-  }, [open, onClose])
+  }, [open])
   if (!open) return null
   // portal to <body>: an ancestor with transform/backdrop-filter (e.g. Card) would otherwise trap the fixed overlay
   return createPortal(

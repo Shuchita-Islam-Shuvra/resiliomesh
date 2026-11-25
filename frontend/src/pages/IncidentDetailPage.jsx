@@ -132,6 +132,12 @@ export default function IncidentDetailPage() {
           </div>
         </Card>
       )}
+      {hasRole('ngo_coordinator') && !['rejected', 'duplicate'].includes(inc.status) && (
+        <Card className="mb-5" title="Relief for the people here"
+          subtitle="Water Resilience Officers handle the water (verify, assess, pumps & crews). You handle the people affected: log what they need and serve it from your NGO's stock.">
+          <Link to={`/ngo?incident=${inc.id}&ward=${inc.ward_id}`}><Button>Log relief need</Button></Link>
+        </Card>
+      )}
 
       <div className="grid gap-5 xl:grid-cols-3">
         <div className="space-y-5 xl:col-span-2">

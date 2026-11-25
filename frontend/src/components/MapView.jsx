@@ -16,8 +16,8 @@ export const wardRadius = (w) => Math.sqrt((w.area_km2 || 2.5) * 1e6 / Math.PI) 
 
 // Map = street map; Satellite = aerial imagery with place names on top
 const BASEMAPS = {
-  map: [{ url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', subdomains: 'abcd',
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>' }],
+  map: [{ url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', subdomains: 'abc',
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors' }],
   satellite: [
     { url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
       attribution: 'Imagery &copy; Esri, Maxar, Earthstar Geographics' },
@@ -63,7 +63,7 @@ function FocusController({ focus, home }) {
  */
 export default function MapView({
   wards = [], incidents = [], assets = [], resources = [], pick, onPick, flyTo,
-  height = 'h-[60vh]', onIncidentClick, onWardClick, focusWard, showWardRadius = true, lockToArea = true, basemap = 'map',
+  height = 'h-[60vh]', onIncidentClick, onWardClick, focusWard, showWardRadius = true, lockToArea = true, basemap = 'satellite',
 }) {
   const { area } = useAuth() || {}
   const bounds = lockToArea ? AREA_BOUNDS[area] : null
@@ -100,13 +100,13 @@ export default function MapView({
               eventHandlers={onWardClick ? { click: () => onWardClick(w) } : undefined}
               pathOptions={{
                 color: RISK_COLOR[level] || UNASSESSED_COLOR,
-                weight: isFocus ? 3 : 1.5,
+                weight: isFocus ? 3 : w.mine ? 3.5 : 1.5,
                 opacity: dimmed ? 0.35 : 1,
-                fillOpacity: isFocus ? 0.28 : dimmed ? 0.05 : 0.16,
-                dashArray: isFocus ? null : '4 4',
+                fillOpacity: isFocus ? 0.28 : dimmed ? 0.05 : w.mine ? 0.3 : 0.16,
+                dashArray: isFocus || w.mine ? null : '4 4',
               }}>
               <Tooltip direction="top" sticky>
-                <strong>{w.name}</strong><br />
+                <strong>{w.name}</strong>{w.mine && <> · <em>your NGO is serving here</em></>}<br />
                 AI risk: {level || 'not scored'} ({Number(w.risk_score ?? w.current_risk_score ?? 0).toFixed(0)}/100)
                 {w.active_incidents !== undefined && <><br />Active reports: {w.active_incidents}</>}
                 {onWardClick && <><br /><em>Click to zoom in</em></>}

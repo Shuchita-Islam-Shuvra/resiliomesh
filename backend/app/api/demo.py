@@ -28,17 +28,19 @@ log = logging.getLogger("resiliomesh.demo")
 router = APIRouter(prefix="/api/demo", tags=["demo"])
 
 SHOBAR = "11111111-1111-1111-1111-111111111103"
+NODI = "11111111-1111-1111-1111-111111111104"
 # profile key -> (account, role, second sign-in factor). Accounts are created by scripts/seed_demo.py.
 PROFILES: dict[str, tuple[str, str, dict]] = {
     "citizen": ("citizen@resiliomesh.demo", "citizen", {}),
     "officer_south": ("officer@resiliomesh.demo", "city_officer", {"employee_id": "DSCC-OFF-01"}),
     "officer_north": ("officer2@resiliomesh.demo", "city_officer", {"employee_id": "DNCC-OFF-02"}),
     "ngo": ("ngo@resiliomesh.demo", "ngo_coordinator", {"organization_id": SHOBAR}),
+    "ngo_north": ("ngo2@resiliomesh.demo", "ngo_coordinator", {"organization_id": NODI}),
     "field": ("field1@resiliomesh.demo", "field_worker", {"employee_id": "FW-001"}),
     "admin": ("admin@resiliomesh.demo", "admin", {"employee_id": "ADM-001"}),
     "admin2": ("admin2@resiliomesh.demo", "admin", {"employee_id": "ADM-002"}),
 }
-ProfileKey = Literal["citizen", "officer_south", "officer_north", "ngo", "field", "admin", "admin2"]
+ProfileKey = Literal["citizen", "officer_south", "officer_north", "ngo", "ngo_north", "field", "admin", "admin2"]
 
 _attempts = SlidingWindowLimiter(limit=10, window_s=60.0)     # per client IP
 

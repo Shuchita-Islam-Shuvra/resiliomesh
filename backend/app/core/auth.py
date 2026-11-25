@@ -140,3 +140,5 @@ def require_roles(*roles: str) -> Callable[[CurrentUser], CurrentUser]:
 
 STAFF = ("city_officer", "ngo_coordinator", "field_worker", "admin")
 COORDINATORS = ("city_officer", "ngo_coordinator", "admin")
+# Pump / crew planning and the dispatch workflow belong to Water Resilience Officers (015).
+OFFICERS = ("city_officer", "admin")

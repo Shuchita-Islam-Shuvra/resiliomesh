@@ -33,12 +33,16 @@ def users():
         c.execute("update security_settings set citizen_reports_per_hour = 1000, citizen_reports_per_day = 5000 where id")
         for key, role, org in [("citizen", "citizen", None), ("citizen2", "citizen", None), ("officer", "city_officer", SOUTH),
                                ("admin", "admin", None), ("field", "field_worker", SOUTH),
-                               ("ngo", "ngo_coordinator", SHOBAR), ("ngo_b", "ngo_coordinator", SHOBAR)]:
+                               ("ngo", "ngo_coordinator", SHOBAR), ("ngo_b", "ngo_coordinator", SHOBAR),
+                               ("ngo_north", "ngo_coordinator", NODI)]:
             try:
                 uid = new_auth_user(c, key)
             except psycopg.Error as e:
                 pytest.skip(f"cannot create auth users in this database: {e}")
-            c.execute("update profiles set role=%s, organization_id=%s where id=%s", (role, org, uid))
+            # NGO coordinators get a home area (014): Shobar's two in Dhaka South, Nodi's in Dhaka North
+            home = {"ngo": "DSCC-10", "ngo_b": "DSCC-10", "ngo_north": "DNCC-02"}.get(key)
+            c.execute("update profiles set role=%s, organization_id=%s, ward_id=coalesce(%s, ward_id) where id=%s",
+                      (role, org, home, uid))
             open_session(c, uid)                       # signed in ...
             if role != "citizen":
                 verify_staff_session(c, uid)           # ... and passed the server-side staff-ID step
@@ -181,6 +185,115 @@ def test_two_coordinators_race_for_last_relief_kits(users):
     assert statuses == ["fulfilled", "open"]       # the loser's need stays open, never half-written
 
 
+# ------------------------------------------------------------------ NGO aid lifecycle (migration 013)
+def test_ngo_allocation_lifecycle_cancel_returns_stock_and_deliver_keeps_it(users):
+    with raw() as c:
+        rid = c.execute("""insert into resources(organization_id, resource_type, name, quantity_total, quantity_available, lat, lng)
+                           values (%s,'relief_kit',%s,10,10,23.74,90.37) returning id""", (SHOBAR, f"life kits {uuid.uuid4()}")).fetchone()["id"]
+        need = c.execute("""insert into community_needs(ward_id, need_type, quantity, households, dedup_key, contact_name)
+                            values ('DSCC-10','relief_kit',6,6,'x',%s) returning id""", (str(uuid.uuid4()),)).fetchone()["id"]
+    with as_user(users["ngo"]) as c:
+        a1 = c.execute("select allocate_to_need(%s,%s,4,%s) r", (need, rid, str(uuid.uuid4()))).fetchone()["r"]["allocation"]["id"]
+        # cannot cancel the need while stock is reserved against it
+        with pytest.raises(psycopg.Error, match="INVALID_STATE"):
+            c.execute("select cancel_need(%s,null)", (need,))
+    with as_user(users["ngo"]) as c:
+        assert c.execute("select ngo_update_allocation(%s,'cancel') r", (a1,)).fetchone()["r"]["ok"]
+        # second cancel is an idempotent replay, stock is returned exactly once
+        assert c.execute("select ngo_update_allocation(%s,'cancel') r", (a1,)).fetchone()["r"]["replayed"]
+    with raw() as c:
+        assert c.execute("select quantity_available q from resources where id=%s", (rid,)).fetchone()["q"] == 10
+        n = c.execute("select status::text s, fulfilled_qty f from community_needs where id=%s", (need,)).fetchone()
+    assert (n["s"], n["f"]) == ("open", 0)
+    with as_user(users["ngo"]) as c:
+        a2 = c.execute("select allocate_to_need(%s,%s,6,%s) r", (need, rid, str(uuid.uuid4()))).fetchone()["r"]["allocation"]["id"]
+        c.execute("select ngo_update_allocation(%s,'dispatch')", (a2,))
+        c.execute("select ngo_update_allocation(%s,'deliver')", (a2,))
+        with pytest.raises(psycopg.Error, match="INVALID_STATE"):          # a delivered allocation cannot be cancelled
+            c.execute("select ngo_update_allocation(%s,'cancel')", (a2,))
+    with raw() as c:
+        assert c.execute("select quantity_available q from resources where id=%s", (rid,)).fetchone()["q"] == 4
+        assert c.execute("select status::text s from community_needs where id=%s", (need,)).fetchone()["s"] == "fulfilled"
+
+
+def test_ngo_cannot_manage_another_ngos_allocation_or_cancel_its_need(users):
+    with raw() as c:
+        rid = c.execute("""insert into resources(organization_id, resource_type, name, quantity_total, quantity_available, lat, lng)
+                           values (%s,'relief_kit',%s,5,5,23.74,90.37) returning id""", (NODI, f"nodi kits {uuid.uuid4()}")).fetchone()["id"]
+        need = c.execute("""insert into community_needs(ward_id, need_type, quantity, households, dedup_key, contact_name)
+                            values ('DSCC-10','relief_kit',2,2,'x',%s) returning id""", (str(uuid.uuid4()),)).fetchone()["id"]
+        alloc = c.execute("select (rm_reserve_resource(%s,2,%s,null,%s,null,null)).id id", (rid, str(uuid.uuid4()), need)).fetchone()["id"]
+        c.execute("update community_needs set organization_id=%s where id=%s", (NODI, need))
+    with as_user(users["ngo"]) as c:                                       # Shobar coordinator vs Nodi's records
+        with pytest.raises(psycopg.Error, match="FORBIDDEN"):
+            c.execute("select ngo_update_allocation(%s,'cancel')", (alloc,))
+    with as_user(users["ngo"]) as c:
+        with pytest.raises(psycopg.Error, match="FORBIDDEN"):
+            c.execute("select cancel_need(%s,null)", (need,))
+    with as_user(users["citizen"]) as c:
+        with pytest.raises(psycopg.Error, match="FORBIDDEN"):
+            c.execute("select ngo_update_allocation(%s,'deliver')", (alloc,))
+
+
+# ------------------------------------------------------------------ North / South coordinators + backup (migration 014)
+def _need_and_stock(ward, org):
+    with raw() as c:
+        rid = c.execute("""insert into resources(organization_id, resource_type, name, quantity_total, quantity_available, lat, lng)
+                           values (%s,'relief_kit',%s,20,20,23.74,90.37) returning id""", (org, f"area kits {uuid.uuid4()}")).fetchone()["id"]
+        need = c.execute("""insert into community_needs(ward_id, need_type, quantity, households, dedup_key, contact_name)
+                            values (%s,'relief_kit',6,6,'x',%s) returning id""", (ward, str(uuid.uuid4()))).fetchone()["id"]
+    return need, rid
+
+
+def test_coordinator_handles_own_area_and_helps_other_area_only_on_request(users):
+    with raw() as c:
+        c.execute("delete from ngo_area_backup")
+    need, _ = _need_and_stock("DNCC-02", NODI)              # a Dhaka North need
+    _, south_stock = _need_and_stock("DSCC-10", SHOBAR)     # Shobar's stock, used by the South coordinator
+    with as_user(users["ngo"]) as c:                        # South coordinator, no backup requested yet
+        assert c.execute("select rm_ngo_area() a").fetchone()["a"] == "DSCC"
+        assert c.execute("select rm_ngo_access(%s) a", (need,)).fetchone()["a"] is None
+        with pytest.raises(psycopg.Error, match="FORBIDDEN"):
+            c.execute("select allocate_to_need(%s,%s,2,%s)", (need, south_stock, str(uuid.uuid4())))
+    with as_user(users["ngo"]) as c:                        # ... and cannot ask for backup on North's behalf
+        with pytest.raises(psycopg.Error, match="FORBIDDEN"):
+            c.execute("select request_ngo_backup(%s,true,null)", (need,))
+
+    with as_user(users["ngo_north"]) as c:                  # North coordinator owns it and asks for help
+        assert c.execute("select rm_ngo_access(%s) a", (need,)).fetchone()["a"] == "home"
+        c.execute("select request_ngo_backup(%s,true,'boats stuck, need kits fast')", (need,))
+    with as_user(users["ngo"]) as c:                        # South can now help, from Shobar's own stock
+        r = c.execute("select allocate_to_need(%s,%s,2,%s) r", (need, south_stock, str(uuid.uuid4()))).fetchone()["r"]
+        assert r["ok"] and r["access"] == "backup"
+    with as_user(users["ngo"]) as c:                        # a helper allocates but does not close the need
+        with pytest.raises(psycopg.Error, match="FORBIDDEN"):
+            c.execute("select cancel_need(%s,null)", (need,))
+
+    need2, _ = _need_and_stock("DNCC-02", NODI)
+    with as_user(users["ngo_north"]) as c:                  # whole area asks for backup
+        c.execute("select set_ngo_area_backup(true,'North overwhelmed')")
+    with as_user(users["ngo"]) as c:
+        assert c.execute("select rm_ngo_access(%s) a", (need2,)).fetchone()["a"] == "backup"
+        status = {r["area"]: r for r in c.execute("select * from ngo_area_status()").fetchall()}
+        assert status["DNCC"]["area_backup"] is True
+    with as_user(users["ngo_north"]) as c:
+        c.execute("select set_ngo_area_backup(false)")
+    with as_user(users["ngo"]) as c:
+        assert c.execute("select rm_ngo_access(%s) a", (need2,)).fetchone()["a"] is None
+
+
+def test_vice_versa_north_helps_south_and_area_change_needs_admin(users):
+    need, _ = _need_and_stock("DSCC-10", SHOBAR)
+    _, north_stock = _need_and_stock("DNCC-02", NODI)
+    with as_user(users["ngo"]) as c:
+        c.execute("select request_ngo_backup(%s,true,null)", (need,))
+    with as_user(users["ngo_north"]) as c:
+        assert c.execute("select allocate_to_need(%s,%s,1,%s) r", (need, north_stock, str(uuid.uuid4()))).fetchone()["r"]["ok"]
+    with as_user(users["ngo"]) as c:                        # a coordinator cannot move themselves to the other area
+        with pytest.raises(psycopg.Error, match="FORBIDDEN"):
+            c.execute("update profiles set ward_id='DNCC-02' where id=%s", (users["ngo"],))
+
+
 # ------------------------------------------------------------------ A07 workflow on real DB
 def _assessed_incident_with_plan(users, pump_id, qty=2):
     inc = new_incident(users["citizen"])
@@ -296,3 +409,52 @@ def test_analytics_is_staff_only(users):
     with pytest.raises(psycopg.Error, match="FORBIDDEN"):
         with as_user(users["citizen"]) as c:
             c.execute("select analytics_dashboard(30, null)")
+
+
+# ------------------------------------------------------------------ officer vs NGO duties (migration 015)
+def test_ngo_coordinator_cannot_approve_or_reject_pump_and_crew_plans(users, pump):
+    inc, plan = _assessed_incident_with_plan(users, pump)
+    for ngo in ("ngo", "ngo_north"):                         # neither area's coordinator
+        with as_user(users[ngo]) as c:
+            with pytest.raises(psycopg.Error, match="FORBIDDEN"):
+                c.execute("select approve_plan(%s,%s,null)", (plan["id"], plan["version"]))
+        with as_user(users[ngo]) as c:
+            with pytest.raises(psycopg.Error, match="FORBIDDEN"):
+                c.execute("select reject_plan(%s,'not ours')", (plan["id"],))
+    with as_user(users["ngo"]) as c:                         # ... but can still read the report
+        assert c.execute("select count(*) n from incidents where id=%s", (inc["id"],)).fetchone()["n"] == 1
+    with raw() as c:
+        assert c.execute("select status from allocation_plans where id=%s", (plan["id"],)).fetchone()["status"] == "pending_approval"
+
+
+def test_ngo_relief_is_not_auto_delivered_when_the_report_is_resolved(users):
+    inc = new_incident(users["citizen"])
+    with raw() as c:
+        rid = c.execute("""insert into resources(organization_id, resource_type, name, quantity_total, quantity_available, lat, lng)
+                           values (%s,'relief_kit',%s,5,5,23.74,90.37) returning id""", (SHOBAR, f"link kits {uuid.uuid4()}")).fetchone()["id"]
+        ward = c.execute("select ward_id from incidents where id=%s", (inc["id"],)).fetchone()["ward_id"]
+        need = c.execute("""insert into community_needs(ward_id, incident_id, need_type, quantity, households, dedup_key, contact_name)
+                            values (%s,%s,'relief_kit',2,2,'x',%s) returning id""", (ward, inc["id"], str(uuid.uuid4()))).fetchone()["id"]
+        c.execute("update community_needs set backup_requested_at = now() where id=%s", (need,))   # whichever area it is in
+    with as_user(users["ngo"]) as c:
+        a = c.execute("select allocate_to_need(%s,%s,2,%s) r", (need, rid, str(uuid.uuid4()))).fetchone()["r"]["allocation"]
+    assert a["need_id"] == str(need) and a["incident_id"] is None      # tied to the need, not the officer's report
+
+
+# ------------------------------------------------------------------ who sees which stock (migration 016)
+def test_ngo_sees_only_own_stock_and_cannot_register_pumps(users):
+    with raw() as c:
+        nodi = c.execute("""insert into resources(organization_id, resource_type, name, quantity_total, quantity_available, lat, lng)
+                            values (%s,'relief_kit',%s,5,5,23.74,90.37) returning id""", (NODI, f"nodi only {uuid.uuid4()}")).fetchone()["id"]
+        pump = c.execute("""insert into resources(organization_id, resource_type, name, quantity_total, quantity_available, lat, lng)
+                            values (%s,'pump',%s,2,2,23.74,90.37) returning id""", (SOUTH, f"south pump {uuid.uuid4()}")).fetchone()["id"]
+    with as_user(users["ngo"]) as c:                          # Shobar coordinator
+        orgs = {r["organization_id"] for r in c.execute("select organization_id::text from resources").fetchall()}
+        assert orgs <= {SHOBAR}
+        assert c.execute("select count(*) n from resources where id = any(%s)", ([nodi, pump],)).fetchone()["n"] == 0
+        with pytest.raises(psycopg.Error):                    # pumps / crews are authority equipment
+            c.execute("""insert into resources(organization_id, resource_type, name, quantity_total, quantity_available, lat, lng)
+                         values (%s,'pump','our pump',1,1,23.74,90.37)""", (SHOBAR,))
+    with as_user(users["officer"]) as c:                      # Dhaka South officer: authority stock, not NGO stock
+        assert c.execute("select count(*) n from resources where id=%s", (pump,)).fetchone()["n"] == 1
+        assert c.execute("select count(*) n from resources where id=%s", (nodi,)).fetchone()["n"] == 0

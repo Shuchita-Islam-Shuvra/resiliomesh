@@ -48,7 +48,7 @@ USERS = [
     ("officer@resiliomesh.demo", "Tanvir Hasan", "city_officer", "south", "DSCC-04"),
     ("officer2@resiliomesh.demo", "Nusrat Jahan", "city_officer", "north", "DNCC-05"),
     ("ngo@resiliomesh.demo", "Sabrina Akter", "ngo_coordinator", "shobar", "DSCC-01"),
-    ("ngo2@resiliomesh.demo", "Mahmud Karim", "ngo_coordinator", "nodi", "DSCC-05"),
+    ("ngo2@resiliomesh.demo", "Mahmud Karim", "ngo_coordinator", "nodi", "DNCC-05"),   # Dhaka North coordinator (014)
     ("field1@resiliomesh.demo", "Rafiqul Islam", "field_worker", "south", "DSCC-02"),
     ("field2@resiliomesh.demo", "Shahidul Alam", "field_worker", "north", "DNCC-02"),
     ("field3@resiliomesh.demo", "Mitu Begum", "field_worker", "shobar", "DSCC-06"),

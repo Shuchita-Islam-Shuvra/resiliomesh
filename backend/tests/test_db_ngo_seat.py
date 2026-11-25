@@ -146,7 +146,7 @@ def test_moving_to_another_ngo_is_a_two_admin_transfer(admins):
     assert p["role"] == "ngo_coordinator" and p["org"] == NODI      # one post: the Shobar post ended
 
 
-# ------------------------------------------------------------------ no North / South split for NGOs
+# ------------------------------------------------------------------ NGOs may LOG needs in both areas (responsibility per area: 014)
 def test_ngo_coordinator_works_in_both_dhaka_north_and_south():
     coord = staff("ngo_coordinator", SHOBAR, bd_mobile())
     with as_user(coord) as c:

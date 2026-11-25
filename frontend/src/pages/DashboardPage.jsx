@@ -301,7 +301,7 @@ function NgoDashboard() {
                     </div>
                     <div>
                       <div className="h-2 rounded-full bg-slate-100"><motion.div className="h-2 rounded-full bg-gradient-to-r from-rose-500 to-amber-400" initial={{ width: 0 }} animate={{ width: `${pct}%` }} transition={{ duration: 0.8 }} /></div>
-                      <p className="mt-0.5 text-right text-xs text-slate-500">{x.fulfilled_qty}/{x.quantity} delivered</p>
+                      <p className="mt-0.5 text-right text-xs text-slate-500">{x.fulfilled_qty}/{x.quantity} allocated</p>
                     </div>
                   </li>
                 )

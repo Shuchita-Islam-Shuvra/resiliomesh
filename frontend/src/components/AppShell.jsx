@@ -15,6 +15,7 @@ import { ROLE_LABEL } from '../lib/format'
 import { Spinner } from './ui'
 
 const COORD = ['city_officer', 'ngo_coordinator', 'admin']
+const OFFICERS = ['city_officer', 'admin']
 const SECTIONS = [
   { title: 'Overview', items: [
     { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -28,7 +29,7 @@ const SECTIONS = [
   { title: 'Operations', items: [
     { to: '/resources', label: 'Resources & Allocation', icon: Boxes, roles: COORD },
     { to: '/ngo', label: 'NGO Coordination', icon: HandHeart, roles: COORD },
-    { to: '/workflows', label: 'Workflows & Tasks', icon: Workflow, roles: COORD },
+    { to: '/workflows', label: 'Workflows & Tasks', icon: Workflow, roles: OFFICERS },
     { to: '/field', label: 'Field Portal', icon: Smartphone, roles: ['field_worker', 'admin'] },
   ] },
   { title: 'Governance', items: [

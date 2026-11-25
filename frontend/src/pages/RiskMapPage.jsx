@@ -104,7 +104,9 @@ function Legend({ showAssets }) {
 }
 
 export default function RiskMapPage() {
-  const { isStaff, area } = useAuth()
+  const { isStaff, area, hasRole, profile } = useAuth()
+  const isNgo = hasRole('ngo_coordinator')
+  const [myWardIds, setMyWardIds] = useState(() => new Set())
   const nav = useNavigate()
   const [wards, setWards] = useState([])
   const [incidents, setIncidents] = useState([])
@@ -126,10 +128,18 @@ export default function RiskMapPage() {
     setWards((w.data || []).map((x) => ({ ...x, area_km2: areaMap[x.ward_id] })))
     setIncidents(i.data || [])
     setAssets(a.data || [])
-  }, [])
+    // NGO coordinators: wards where their own organisation has live allocations (to needs or incidents)
+    if (isNgo && profile?.organization_id) {
+      const { data: al } = await supabase.from('allocations')
+        .select('status, resources!inner(organization_id), community_needs(ward_id), incidents(ward_id)')
+        .eq('resources.organization_id', profile.organization_id).in('status', ['reserved', 'dispatched', 'consumed'])
+      setMyWardIds(new Set((al || []).flatMap((x) => [x.community_needs?.ward_id, x.incidents?.ward_id]).filter(Boolean)))
+    }
+  }, [isNgo, profile?.organization_id])
   useEffect(() => { load() }, [load])
-  useRealtime(['incidents', 'wards'], useDebouncedCallback(load, 800))
+  useRealtime(['incidents', 'wards', 'allocations'], useDebouncedCallback(load, 800))
 
+  const markedWards = useMemo(() => isNgo ? wards.map((w) => ({ ...w, mine: myWardIds.has(w.ward_id) })) : wards, [wards, isNgo, myWardIds])
   const selected = useMemo(() => wards.find((w) => w.ward_id === focusId) || null, [wards, focusId])
   useEffect(() => {
     if (!focusId) { setWeather(null); return }
@@ -145,6 +155,7 @@ export default function RiskMapPage() {
     { label: 'Wards', value: wards.length, icon: MapPin },
     { label: 'Open reports', value: incidents.length, icon: Droplets },
     { label: 'High / critical reports', value: incidents.filter((i) => ['high', 'critical'].includes(i.risk_level)).length, icon: AlertTriangle, warn: true },
+    ...(isNgo ? [{ label: 'Wards your NGO serves', value: myWardIds.size, icon: MapPin }] : []),
     ...(isStaff ? [{ label: 'Blocked drains', value: assets.filter((a) => a.status === 'blocked').length, icon: Wrench, warn: true }] : []),
   ]
 
@@ -185,7 +196,7 @@ export default function RiskMapPage() {
               <button type="button" onClick={() => setFocusId('')} className="rounded-full border border-slate-300 px-2.5 py-0.5 text-xs font-medium text-slate-700 hover:bg-slate-50">Show all of {place}</button>
             </div>
           )}
-          <MapView height="h-[65vh] min-h-[380px]" basemap="satellite" wards={layers.wards ? wards : []} incidents={layers.incidents ? shownIncidents : []}
+          <MapView height="h-[65vh] min-h-[380px]" basemap="satellite" wards={layers.wards ? markedWards : []} incidents={layers.incidents ? shownIncidents : []}
             assets={layers.assets ? shownAssets : []} focusWard={selected} onWardClick={(w) => setFocusId(w.ward_id)}
             onIncidentClick={isStaff ? (i) => nav(`/incidents/${i.id}`) : undefined} />
           <Legend showAssets={isStaff} />

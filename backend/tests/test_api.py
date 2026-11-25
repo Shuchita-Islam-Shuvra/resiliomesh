@@ -60,3 +60,10 @@ def test_rate_limiter_sliding_window():
     assert [lim.allow("u", now=t)[0] for t in (0, 1, 2, 3)] == [True, True, True, False]
     assert lim.allow("u", now=61)[0] is True       # window slid
     assert lim.allow("other", now=3)[0] is True    # per-identity buckets
+
+
+def test_ngo_coordinator_cannot_run_pump_and_crew_optimizer_or_workflows(client_as):
+    c = client_as("ngo_coordinator")
+    assert c.post("/api/plans/optimize", json={"incident_ids": ["00000000-0000-0000-0000-000000000001"]}).status_code == 403
+    assert c.post("/api/workflows/process-now").status_code == 403
+    assert c.get("/api/workflows/worker").status_code == 403

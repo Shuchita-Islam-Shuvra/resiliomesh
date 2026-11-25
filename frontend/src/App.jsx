@@ -33,6 +33,7 @@ const PRELOAD = [
 ]
 
 const COORD = ['city_officer', 'ngo_coordinator', 'admin']
+const OFFICERS = ['city_officer', 'admin'] // pump & crew planning + dispatch workflow (migration 015)
 const guard = (el, roles) => <ProtectedRoute roles={roles}>{el}</ProtectedRoute>
 
 export default function App() {
@@ -60,7 +61,7 @@ export default function App() {
           <Route path="/resources" element={guard(<ResourcesPage />, COORD)} />
           <Route path="/ngo" element={guard(<NgoCenterPage />, COORD)} />
           <Route path="/field" element={guard(<FieldPortalPage />, ['field_worker', 'admin'])} />
-          <Route path="/workflows" element={guard(<WorkflowsPage />, COORD)} />
+          <Route path="/workflows" element={guard(<WorkflowsPage />, OFFICERS)} />
           <Route path="/analytics" element={guard(<AnalyticsPage />, COORD)} />
           <Route path="/admin" element={guard(<AdminPage />, ['admin'])} />
           <Route path="/account" element={<AccountPage />} />

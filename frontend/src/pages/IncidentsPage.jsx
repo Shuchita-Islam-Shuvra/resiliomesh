@@ -39,7 +39,7 @@ function IncidentsTab() {
   const [wards, setWards] = useState([])
   // Officers and city-corporation crews see only their own area (Dhaka North / South); the database enforces it (011 / 012)
   const [f, setF] = useState({ q: '', status: '', category: '', risk: '', ward: '', area: area || '' })
-  const [sort, setSort] = useState({ field: 'created_at', dir: 'desc' })
+  const [sort, setSort] = useState({ field: 'risk_score', dir: 'desc' }) // most dangerous first: critical, high, moderate, low, then unassessed
   const [page, setPage] = useState(1)
   const [err, setErr] = useState('')
 
@@ -55,7 +55,7 @@ function IncidentsTab() {
     if (f.risk) q = q.eq('risk_level', f.risk)
     if (f.ward) q = q.eq('ward_id', f.ward)
     if (f.area) q = q.eq('wards.city_corporation', f.area)
-    q = q.order(sort.field, { ascending: sort.dir === 'asc', nullsFirst: false }).range((page - 1) * PAGE, page * PAGE - 1)
+    q = q.order('is_closed', { ascending: true }).order(sort.field, { ascending: sort.dir === 'asc', nullsFirst: false }).order('created_at', { ascending: false }).range((page - 1) * PAGE, page * PAGE - 1)
     const { data, count, error } = await q
     if (error) { setErr(errorMessage(error)); setRows([]); return }
     setErr(''); setRows(data); setTotal(count || 0)
@@ -76,8 +76,8 @@ function IncidentsTab() {
           <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" aria-hidden />
           <Input id="inc-search" className="pl-8" placeholder="Search title, reference, description…" value={f.q} onChange={set('q')} />
         </div>
-        <Select aria-label="Filter by status" value={f.status} onChange={set('status')}><option value="">All statuses</option>{STATUSES.map((s) => <option key={s} value={s}>{humanize(s)}</option>)}</Select>
-        <Select aria-label="Filter by category" value={f.category} onChange={set('category')}><option value="">All categories</option>{Object.entries(CATEGORY_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</Select>
+        <Select aria-label="Filter by status" value={f.status} onChange={set('status')}><option value="">Status</option>{STATUSES.map((s) => <option key={s} value={s}>{humanize(s)}</option>)}</Select>
+        <Select aria-label="Filter by category" value={f.category} onChange={set('category')}><option value="">Category</option>{Object.entries(CATEGORY_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</Select>
         <Select aria-label="Filter by risk" value={f.risk} onChange={set('risk')}><option value="">Any risk</option>{['critical', 'high', 'moderate', 'low'].map((r) => <option key={r} value={r}>{humanize(r)}</option>)}</Select>
         {!area && <Select aria-label="Filter by area" value={f.area} onChange={set('area')}><option value="">All of Dhaka</option>{Object.entries(AREA_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</Select>}
         <Select aria-label="Filter by ward" value={f.ward} onChange={set('ward')}><option value="">All wards</option>{wards.filter((w) => !f.area || w.city_corporation === f.area).map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</Select>

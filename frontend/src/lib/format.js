@@ -30,6 +30,11 @@ export const STATUS_STYLE = {
   resolved: 'bg-emerald-50 text-emerald-700 ring-emerald-300',
   rejected: 'bg-rose-50 text-rose-700 ring-rose-300',
   duplicate: 'bg-zinc-100 text-zinc-600 ring-zinc-300',
+  // stock allocations
+  reserved: 'bg-amber-50 text-amber-800 ring-amber-300',
+  dispatched: 'bg-sky-50 text-sky-700 ring-sky-300',
+  consumed: 'bg-emerald-50 text-emerald-700 ring-emerald-300',
+  released: 'bg-zinc-100 text-zinc-600 ring-zinc-300',
   // tasks / plans / runs
   pending: 'bg-slate-100 text-slate-700 ring-slate-300',
   assigned: 'bg-sky-50 text-sky-700 ring-sky-300',

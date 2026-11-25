@@ -8,15 +8,15 @@ import { ROLE_BY_KEY } from '../lib/roles'
 
 const MODULES = [
   {
-    img: '/images/hero-ops.webp', icon: BrainCircuit, title: 'Predict drainage risk',
+    img: '/images/photo-flooded-road.webp', icon: BrainCircuit, title: 'Predict drainage risk',
     text: 'Live rainfall, drainage condition and past floods feed an explainable AI model that scores every ward and report.',
   },
   {
-    img: '/images/hero-relief.webp', icon: HandHeart, title: 'Coordinate relief',
+    img: '/images/photo-relief-aid.webp', icon: HandHeart, title: 'Coordinate relief',
     text: 'Pumps, crews and relief kits are allocated by an optimiser under real stock limits, with duplicate aid blocked.',
   },
   {
-    img: '/images/hero-field.webp', icon: Smartphone, title: 'Work in the field, even offline',
+    img: '/images/photo-sandbag-crew.webp', icon: Smartphone, title: 'Work in the field, even offline',
     text: 'Field teams get tasks on their phone, update them without signal, and everything syncs when they reconnect.',
   },
 ]
@@ -32,10 +32,10 @@ const fadeUp = { hidden: { opacity: 0, y: 24 }, show: { opacity: 1, y: 0 } }
 // Video-style showcase: slides cross-fade while slowly zooming/panning (Ken Burns).
 // Captions sit BELOW the frame, never on top of the picture.
 const SLIDES = [
-  { img: '/images/hero-city.webp', caption: 'City-wide view: AI links rainfall, flooded wards, pumps and relief teams', pan: ['0%', '-3%'] },
-  { img: '/images/hero-ops.webp', caption: 'Live risk map: ward risk, drainage assets and crews on the move', pan: ['-2%', '2%'] },
-  { img: '/images/hero-relief.webp', caption: 'Relief coordination: stock, needs and deliveries across NGOs', pan: ['2%', '-2%'] },
-  { img: '/images/hero-field.webp', caption: 'Field work: tasks on a tablet, saved offline, synced on reconnect', pan: ['0%', '3%'] },
+  { img: '/images/photo-flooded-street.webp', caption: 'City-wide view: AI links rainfall, flooded wards, pumps and relief teams', pan: ['0%', '-3%'] },
+  { img: '/images/photo-flooded-road.webp', caption: 'Live risk map: ward risk, drainage assets and crews on the move', pan: ['-2%', '2%'] },
+  { img: '/images/photo-relief-aid.webp', caption: 'Relief coordination: stock, needs and deliveries across NGOs', pan: ['2%', '-2%'] },
+  { img: '/images/photo-sandbag-crew.webp', caption: 'Field work: tasks on a tablet, saved offline, synced on reconnect', pan: ['0%', '3%'] },
 ]
 const SLIDE_MS = 3000
 const FADE_S = 0.7
@@ -201,6 +201,18 @@ export default function HomePage() {
                 </motion.article>
               ))}
             </div>
+          </div>
+        </section>
+
+        {/* ------------------------------------------------ full-width photo band */}
+        <section className="relative isolate overflow-hidden bg-ink-900">
+          <img src="/images/photo-sandbag-street-bw.webp" alt="Responders building a sandbag barrier beside a flooded street" loading="lazy" decoding="async"
+            className="absolute inset-0 -z-10 h-full w-full object-cover opacity-60" />
+          <div aria-hidden className="absolute inset-0 -z-10 bg-gradient-to-r from-slate-950/90 via-slate-950/60 to-transparent" />
+          <div className="mx-auto max-w-6xl px-4 py-20 sm:px-6 lg:py-28">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-brand-200">Why it matters</p>
+            <h2 className="mt-3 max-w-xl text-3xl font-bold leading-tight tracking-tight text-white sm:text-4xl">When the water rises, the first hour decides everything.</h2>
+            <p className="mt-4 max-w-lg text-sm text-slate-200 sm:text-base">Streets flood, crews improvise, and help arrives unevenly. ResilioMesh points people and supplies to the wards that need them first.</p>
           </div>
         </section>
 
