@@ -14,7 +14,7 @@
 | | Role/resource authorisation | 5 roles; RLS per role **and organisation**; RPC role checks; route guards | `003_rls.sql`, `ProtectedRoute.jsx` |
 | | Session protection | auto token refresh, deactivated accounts force-logout (realtime), self-role-change blocked | `AuthContext.jsx`, `rm_guard_profile` |
 | **M04** | Rule-based decisions | 7 risk rules, priority formula, demand derivation, reusable vs consumable equipment | `ml/rules.py`, `optimizer.derive_demand` |
-| | Multi-condition transitions | incident state machine (8 states) + task state machine + plan states, each with role conditions | `rm_incident_transition_allowed`, `transition_incident`, `update_task_status` |
+| | Multi-condition transitions | incident state machine (8 states) + task state machine + plan states, each with role conditions; four-eyes rule (a reporter can never verify their own report) | `rm_incident_transition_allowed`, `transition_incident`, `update_task_status`, `022_reporter_cannot_verify.sql` |
 | | Correct outcomes | boundary tests (34.9/35/75), auto-resolve only when every task is done | `test_risk_engine.py`, `test_db_flow.py` |
 | **M05** | Search, filter, sort | server-side `ilike` search, 4 filters, sortable headers, pagination | `IncidentsPage.jsx` |
 | | Calculations/aggregation | analytics RPC: percentiles, utilisation %, per-ward/month/year aggregates; risk scoring | `analytics_dashboard` |

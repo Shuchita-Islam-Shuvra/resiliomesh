@@ -35,10 +35,11 @@ export default function IncidentDetailPage() {
   const wardArea = inc?.wards?.city_corporation
   const officer = hasRole('city_officer', 'admin') && canManageArea(wardArea)
   const outsideArea = hasRole('city_officer') && inc && !officer
+  const ownReport = !!inc && !!profile && inc.reporter_id === profile.id
 
   const load = useCallback(async () => {
     const { data, error } = await supabase.from('incidents')
-      .select('*, wards(name, city_corporation), drainage_assets(name,code,status,condition_score), reporter:profiles!incidents_reporter_id_fkey(full_name)')
+      .select('*, wards(name, city_corporation), drainage_assets(name,code,status,condition_score), reporter:profiles!incidents_reporter_id_fkey(full_name, role)')
       .eq('id', id).maybeSingle()
     if (error || !data) { setNotFound(true); return }
     setInc(data)
@@ -94,7 +95,7 @@ export default function IncidentDetailPage() {
   return (
     <>
       <Link to="/incidents" className="mb-3 inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-800"><ArrowLeft className="h-4 w-4" aria-hidden />Back to reports</Link>
-      <PageHeader title={inc.title} description={`${inc.reference_code} · ${CATEGORY_LABEL[inc.category]} · ${inc.wards?.name} · reported ${timeAgo(inc.created_at)}${inc.reporter ? ` by ${inc.reporter.full_name}` : ''}`}
+      <PageHeader title={inc.title} description={`${inc.reference_code} · ${CATEGORY_LABEL[inc.category]} · ${inc.wards?.name} · reported ${timeAgo(inc.created_at)}${inc.reporter ? ` by ${inc.reporter.full_name}${inc.reporter.role && inc.reporter.role !== 'citizen' ? ` (${ROLE_LABEL[inc.reporter.role] || humanize(inc.reporter.role)})` : ''}` : ''}`}
         actions={<div className="flex items-center gap-2"><StatusBadge status={inc.status} /><RiskBadge level={inc.risk_level} score={inc.risk_score} /></div>} />
 
       {peers.length > 0 && (
@@ -118,14 +119,19 @@ export default function IncidentDetailPage() {
             : 'Your authority has no area (Dhaka North / Dhaka South) set yet. Ask an admin.'}
         </Alert>
       )}
+      {officer && ownReport && ['reported', 'duplicate'].includes(inc.status) && (
+        <Alert tone="info" className="mb-4" title="You filed this report">
+          Under the four-eyes rule, another officer of {areaLabel(wardArea) || 'this area'} or an admin must verify it. You can still mark it as a duplicate or withdraw (reject) it with a reason.
+        </Alert>
+      )}
       {officer && (
         <Card className="mb-5" title="Actions" subtitle={`Version ${inc.version} — actions use optimistic locking`}>
           <div className="flex flex-wrap gap-2">
-            {inc.status === 'reported' && <Button loading={busy === 'verified'} onClick={() => transition('verified')}><CheckCircle2 className="h-4 w-4" />Verify</Button>}
+            {inc.status === 'reported' && !ownReport && <Button loading={busy === 'verified'} onClick={() => transition('verified')}><CheckCircle2 className="h-4 w-4" />Verify</Button>}
             {['verified', 'assessed'].includes(inc.status) && <Button loading={busy === 'assess'} onClick={assess}><BrainCircuit className="h-4 w-4" />{inc.status === 'assessed' ? 'Re-run AI assessment' : 'Run AI risk assessment'}</Button>}
             {inc.status === 'assessed' && <Link to={`/resources?tab=plans&incident=${inc.id}`}><Button variant="secondary">Plan resources</Button></Link>}
             {inc.status === 'in_progress' && <Button variant="secondary" loading={busy === 'resolved'} onClick={() => transition('resolved')}>Mark resolved</Button>}
-            {inc.status === 'duplicate' && <Button variant="secondary" loading={busy === 'verified'} onClick={() => transition('verified')}>Not a duplicate — verify</Button>}
+            {inc.status === 'duplicate' && !ownReport && <Button variant="secondary" loading={busy === 'verified'} onClick={() => transition('verified')}>Not a duplicate — verify</Button>}
             {['reported', 'verified'].includes(inc.status) && <Button variant="secondary" onClick={openDuplicate}><Copy className="h-4 w-4" />Mark duplicate</Button>}
             {['reported', 'verified', 'assessed'].includes(inc.status) && <Button variant="danger" onClick={() => setModal('reject')}>Reject</Button>}
           </div>

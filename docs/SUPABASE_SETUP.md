@@ -32,8 +32,9 @@ Run these files **one at a time, in this order**. Paste the content and click **
 | 20 | `supabase/migrations/019_field_crews.sql` | Field crews: a task gets a crew sized to the job with one lead, picked by team, area, duty and workload; on/off duty; decline with automatic replacement; officers set crews; GPS at start and finish |
 | 21 | `supabase/migrations/020_field_failure_after_accept.sql` | A field worker can report a problem after accepting, without a fake "start work" |
 | 22 | `supabase/migrations/021_admin_duties.sql` | Two admins, two jobs: the **system owner** sets the platform up (roster, NGOAB registry, official domains, fault injection); the **access reviewer** reviews access, audits and revokes. Both approve access (two-person rule). New admins start as reviewer; only the platform team (SQL) changes a duty |
+| 23 | `supabase/migrations/022_reporter_cannot_verify.sql` | Four-eyes rule: whoever filed a report (an officer from the field, an admin logging a call-in) cannot verify it; another officer of that area or an admin must. The reporter can still mark it duplicate or withdraw it with a reason |
 
-Shortcut: run `001_schema.sql`, then `supabase/run_after_001.sql` (files 2–17 in one script), then 017–021 one by one.
+Shortcut: run `001_schema.sql`, then `supabase/run_after_001.sql` (files 2–17 in one script), then 017–022 one by one.
 
 All files can be re-run safely (they are idempotent). If you ever re-run `003_rls.sql`, run 006–016 again afterwards (003 resets every policy). If you re-run `004_rpc.sql`, run 009, 011, 012 and 015 again. If you re-run `008`, run 010 again.
 

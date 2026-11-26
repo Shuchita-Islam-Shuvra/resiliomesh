@@ -136,6 +136,26 @@ def test_role_rules_on_transitions(users):
             c.execute("select transition_incident(%s,'assessed',%s,null,null)", (inc["id"], v["incident"]["version"]))
 
 
+def test_reporter_cannot_verify_own_report_four_eyes(users):
+    inc = new_incident(users["officer"], title="Officer field report")
+    assert str(inc["reporter_id"]) == users["officer"] and inc["status"] == "reported"
+    with pytest.raises(psycopg.Error, match="four-eyes"):
+        with as_user(users["officer"]) as c:
+            c.execute("select transition_incident(%s,'verified',%s,null,null)", (inc["id"], inc["version"]))
+    with pytest.raises(psycopg.Error, match="four-eyes"):
+        with as_user(users["officer"]) as c:
+            c.execute("update incidents set status='verified' where id=%s", (inc["id"],))
+    with as_user(users["admin"]) as c:
+        r = c.execute("select transition_incident(%s,'verified',%s,null,null) r", (inc["id"], inc["version"])).fetchone()["r"]
+    assert r["ok"] is True and str(r["incident"]["verified_by"]) == users["admin"]
+
+    own = new_incident(users["officer"], title="Officer report withdrawn")
+    with as_user(users["officer"]) as c:
+        r = c.execute("select transition_incident(%s,'rejected',%s,'Water cleared before crews arrived',null) r",
+                      (own["id"], own["version"])).fetchone()["r"]
+    assert r["ok"] is True and r["incident"]["status"] == "rejected"
+
+
 def test_geospatial_duplicate_detection(users):
     lat, lng = random_dhaka_point()
     a = new_incident(users["citizen"], lat=lat, lng=lng)
