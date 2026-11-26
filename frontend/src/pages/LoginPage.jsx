@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, Navigate, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
-import { ArrowDown, Lock, LogIn, MailCheck, UserPlus } from 'lucide-react'
+import { ArrowDown, LogIn, MailCheck, UserPlus } from 'lucide-react'
 import { Alert, Button, Field, Input, Select } from '../components/ui'
 import { PasswordInput } from '../components/PasswordInput'
 import DemoProfiles from '../components/DemoProfiles'
@@ -181,9 +181,6 @@ export default function LoginPage() {
             {formError.action && <button type="button" onClick={formError.action.run} className="mt-1 block font-semibold underline">{formError.action.label}</button>}
           </Alert>
         )}
-        {role === 'admin' && (
-          <p className="flex items-start gap-2 rounded-lg bg-slate-100 px-3 py-2 text-xs text-slate-600"><Lock className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />Administrator sign-ins are restricted and recorded in the audit log.</p>
-        )}
 
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Email" error={errors.email} required>
@@ -193,7 +190,7 @@ export default function LoginPage() {
             {(a) => <PasswordInput {...a} autoComplete="current-password" value={v.password} onChange={set('password')} />}
           </Field>
           {idLabel && (
-            <Field label={idLabel} error={errors.employee_id} required hint={role === 'admin' ? 'Issued by the platform team' : 'The ID approved with your account'}>
+            <Field label={idLabel} error={errors.employee_id} required hint={role === 'admin' ? undefined : 'The ID approved with your account'}>
               {(a) => <Input {...a} value={v.employee_id} onChange={set('employee_id')} placeholder={ID_PLACEHOLDER[role]} autoComplete="off" autoCapitalize="characters" spellCheck={false} maxLength={30} />}
             </Field>
           )}
