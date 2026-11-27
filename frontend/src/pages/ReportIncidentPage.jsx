@@ -43,9 +43,17 @@ export default function ReportIncidentPage() {
   }, [v.lat, v.lng, online, profile.role])
 
   const set = (k) => (e) => setV({ ...v, [k]: e.target.value })
-  const pick = ({ lat, lng }) => {
+  const [flyTo, setFlyTo] = useState(null)
+  // Choosing a ward drops the pin on that ward and moves the map there.
+  const chooseWard = (e) => {
+    const w = wards.find((x) => x.id === e.target.value)
+    setV((x) => ({ ...x, ward_id: e.target.value, ...(w && { lat: +Number(w.lat).toFixed(6), lng: +Number(w.lng).toFixed(6) }) }))
+    if (w) setFlyTo([Number(w.lat), Number(w.lng)])
+  }
+  // A map tap only moves the pin inside the chosen ward; GPS (or no ward yet) picks the nearest ward.
+  const pick = ({ lat, lng }, { keepWard = true } = {}) => {
     let ward = v.ward_id
-    if (wards.length) {
+    if (wards.length && !(keepWard && v.ward_id)) {
       ward = wards.reduce((best, w) => ((w.lat - lat) ** 2 + (w.lng - lng) ** 2 < (best.lat - lat) ** 2 + (best.lng - lng) ** 2 ? w : best)).id
     }
     setV((x) => ({ ...x, lat, lng, ward_id: ward }))
@@ -53,7 +61,7 @@ export default function ReportIncidentPage() {
   const gps = () => {
     if (!navigator.geolocation) return toast.error('GPS is not available on this device')
     navigator.geolocation.getCurrentPosition(
-      (p) => pick({ lat: +p.coords.latitude.toFixed(6), lng: +p.coords.longitude.toFixed(6) }),
+      (p) => pick({ lat: +p.coords.latitude.toFixed(6), lng: +p.coords.longitude.toFixed(6) }, { keepWard: false }),
       () => toast.error('Could not read GPS location. Tap the map instead.'),
       { enableHighAccuracy: true, timeout: 8000 },
     )
@@ -124,13 +132,13 @@ export default function ReportIncidentPage() {
             <Field label="Description" error={errors.description} required className="sm:col-span-2">{(a) => <Textarea {...a} rows={4} value={v.description} onChange={set('description')} placeholder="What do you see? Is traffic blocked? Is water entering homes or shops?" />}</Field>
             <Field label="Water depth (cm)" error={errors.water_depth_cm} hint="Ankle ≈ 10, knee ≈ 45, waist ≈ 90">{(a) => <Input {...a} type="number" min={0} max={300} value={v.water_depth_cm} onChange={set('water_depth_cm')} />}</Field>
             <Field label="People affected (approx.)" error={errors.people_affected}>{(a) => <Input {...a} type="number" min={0} value={v.people_affected} onChange={set('people_affected')} />}</Field>
-            <Field label="Ward / area" error={errors.ward_id} required>{(a) => <Select {...a} value={v.ward_id} onChange={set('ward_id')}><option value="">Select</option>{wards.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</Select>}</Field>
+            <Field label="Ward / area" error={errors.ward_id} required>{(a) => <Select {...a} value={v.ward_id} onChange={chooseWard}><option value="">Select</option>{wards.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</Select>}</Field>
             <Field label="Nearby drain / canal (optional)">{(a) => <Select {...a} value={v.asset_id} onChange={set('asset_id')}><option value="">Not sure</option>{assets.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</Select>}</Field>
           </div>
         </Card>
         <Card title="Location" actions={<Button type="button" size="sm" variant="secondary" onClick={gps}><Crosshair className="h-4 w-4" />Use GPS</Button>}>
           <p className="mb-2 text-sm text-slate-500">Tap the map to place the report.</p>
-          <MapView height="h-80" pick={v.lat ? { lat: v.lat, lng: v.lng } : null} onPick={pick} showWardRadius={false} />
+          <MapView height="h-80" pick={v.lat ? { lat: v.lat, lng: v.lng } : null} onPick={pick} flyTo={flyTo} showWardRadius={false} />
           <p className="mt-2 text-xs text-slate-500">{v.lat ? `Selected: ${v.lat}, ${v.lng}` : 'No location selected yet'}</p>
           {errors.location && <p role="alert" className="mt-1 text-xs font-medium text-rose-600">{errors.location}</p>}
           {nearby.length > 0 && (
