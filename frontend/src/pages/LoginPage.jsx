@@ -62,7 +62,7 @@ export default function LoginPage() {
   }, [])
   const ngos = useMemo(() => orgs.filter((o) => o.type === 'ngo'), [orgs])
 
-  if (session && !busy) return <Navigate to={loc.state?.from || '/dashboard'} replace />
+  if (session && !busy) return <Navigate to={'/dashboard'} replace />
 
   const set = (k) => (e) => {
     setV((cur) => ({ ...cur, [k]: e.target.value }))
@@ -98,7 +98,7 @@ export default function LoginPage() {
     try {
       await signInAs(v.email.trim().toLowerCase(), v.password, role, { employee_id: v.employee_id, organization_id: v.organization_id })
       writeLock({ fails: 0, until: 0 })
-      nav(loc.state?.from || '/dashboard', { replace: true })
+      nav('/dashboard', { replace: true })
     } catch (err) {
       if (err.code === 'ROLE_MISMATCH') {
         const actual = ROLE_BY_KEY[err.actualRole]
@@ -226,7 +226,7 @@ export default function LoginPage() {
       {demoOn !== false ? (
         <div className="mt-6">
           <DemoProfiles role={role} busy={busy} setBusy={setBusy} codeRequired={codeRequired}
-            onSignedIn={() => nav(loc.state?.from || '/dashboard', { replace: true })} />
+            onSignedIn={() => nav('/dashboard', { replace: true })} />
         </div>
       ) :       (<details className="mt-5 rounded-xl border border-slate-200 bg-slate-50/60 p-3 text-sm">
         <summary className="cursor-pointer font-medium text-slate-700">Demo account (judges)</summary>

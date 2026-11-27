@@ -1,9 +1,9 @@
-import { Suspense, useEffect, useState } from 'react'
+import { Suspense, useEffect, useRef, useState } from 'react'
 import { NavLink, useLocation, useNavigate, useOutlet } from 'react-router-dom'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
-  BarChart3, Boxes, BrainCircuit, ChevronsLeft, ChevronsRight, ClipboardList, CloudRain, HandHeart, LayoutDashboard, LogOut, Map,
-  Menu, Plus, ShieldCheck, Smartphone, UserCog, Workflow, X, Wifi, WifiOff,
+  BadgeCheck, BarChart3, Boxes, BrainCircuit, Building2, ChevronsLeft, ChevronsRight, ClipboardList, CloudRain, Eye, EyeOff, HandHeart,
+  KeyRound, LayoutDashboard, LogOut, Mail, Map, Menu, Phone, Plus, ShieldCheck, Smartphone, UserCog, Workflow, X, Wifi, WifiOff,
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
@@ -12,6 +12,8 @@ import { flushOutbox } from '../offline/sync'
 import { supabase } from '../lib/supabase'
 import { areaLabel } from '../lib/areas'
 import { ROLE_LABEL } from '../lib/format'
+import { isDemoEmail } from '../lib/demoAccounts'
+import { errorMessage } from '../lib/errors'
 import NotificationBell from './NotificationBell'
 import ThemeToggle from './ThemeToggle'
 import { Spinner } from './ui'
@@ -55,6 +57,138 @@ function Clock() {
   const [now, setNow] = useState(new Date())
   useEffect(() => { const t = setInterval(() => setNow(new Date()), 30000); return () => clearInterval(t) }, [])
   return <span className="tabular-nums">{now.toLocaleString('en-GB', { weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Dhaka' })} · Dhaka</span>
+}
+
+function ProfileMenu({ initials, roleLine, onSignOut }) {
+  const { profile, session, org, updatePassword } = useAuth()
+  const toast = useToast()
+  const nav = useNavigate()
+  const location = useLocation()
+  const box = useRef(null)
+  const [open, setOpen] = useState(false)
+  const [pwOpen, setPwOpen] = useState(false)
+  const [pw, setPw] = useState('')
+  const [pw2, setPw2] = useState('')
+  const [show, setShow] = useState(false)
+  const [err, setErr] = useState('')
+  const [busy, setBusy] = useState(false)
+  const email = session?.user?.email || ''
+  const demo = isDemoEmail(email)
+
+  const reset = () => { setPwOpen(false); setPw(''); setPw2(''); setErr(''); setShow(false) }
+  const close = () => { setOpen(false); reset() }
+
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e) => { if (box.current && !box.current.contains(e.target)) close() }
+    const onKey = (e) => { if (e.key === 'Escape') close() }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey) }
+  }, [open])
+  useEffect(() => { close() }, [location.pathname])
+
+  const savePassword = async (e) => {
+    e.preventDefault()
+    setErr('')
+    if (pw.length < 8) { setErr('Use at least 8 characters'); return }
+    if (pw !== pw2) { setErr('The two passwords do not match'); return }
+    setBusy(true)
+    try {
+      await updatePassword(pw)
+      toast.success('Password updated')
+      reset()
+    } catch (x) {
+      setErr(/reauth|recent/i.test(x?.message || '') ? 'For security, sign out and sign in again, then change your password.' : errorMessage(x))
+    } finally { setBusy(false) }
+  }
+
+  const row = 'flex items-start gap-3 px-4 py-2 text-sm'
+  const inp = 'block w-full rounded-lg border-0 bg-surface px-3 py-2 text-sm text-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-600'
+  return (
+    <div className="relative border-l border-slate-200 pl-3" ref={box}>
+      <button type="button" onClick={() => (open ? close() : setOpen(true))} aria-haspopup="dialog" aria-expanded={open} aria-label="Open profile"
+        className="flex items-center gap-3 rounded-full p-0.5 transition hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-brand-600">
+        <span className="hidden min-w-0 text-center sm:block">
+          <span className="block translate-y-[3px] truncate text-base font-bold leading-tight tracking-tight text-slate-900">{profile?.full_name}</span>
+          <span className={`mt-1.5 inline-block whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-semibold leading-none ring-1 ring-inset ${ROLE_TONE[profile?.role] || ''}`}>{roleLine}</span>
+        </span>
+        <span aria-hidden className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-brand-500 to-brand-700 text-sm font-bold text-white transition ${open ? 'ring-2 ring-brand-400 ring-offset-2 ring-offset-surface' : ''}`}>{initials}</span>
+      </button>
+
+      <AnimatePresence>
+        {open && (
+          <motion.div role="dialog" aria-label="Your profile"
+            initial={{ opacity: 0, y: -6, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -6, scale: 0.98 }} transition={{ duration: 0.15 }}
+            className="fixed left-4 right-4 top-14 z-[600] mt-1 max-h-[85vh] overflow-y-auto rounded-xl border border-slate-200 bg-surface shadow-xl sm:absolute sm:left-auto sm:right-0 sm:top-full sm:mt-2 sm:w-[340px]">
+            <div className="flex items-center gap-3 border-b border-slate-100 px-4 py-4">
+              <span aria-hidden className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-brand-500 to-brand-700 text-lg font-bold text-white">{initials}</span>
+              <div className="min-w-0">
+                <p className="truncate font-bold text-slate-900">{profile?.full_name}</p>
+                <span className={`mt-1 inline-block max-w-full truncate rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ring-inset ${ROLE_TONE[profile?.role] || ''}`}>{roleLine}</span>
+              </div>
+            </div>
+
+            <div className="border-b border-slate-100 py-2">
+              {email && <div className={row}><Mail className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" aria-hidden /><span className="min-w-0 break-all text-slate-700">{email}</span></div>}
+              <div className={row}><Phone className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" aria-hidden />
+                <span className="text-slate-700">{profile?.phone || <span className="text-slate-400">No mobile number</span>}
+                  {profile?.phone && profile?.phone_verified_at && <BadgeCheck className="ml-1 inline h-4 w-4 text-emerald-600" aria-label="Verified" />}</span>
+              </div>
+              {org?.name && <div className={row}><Building2 className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" aria-hidden /><span className="text-slate-700">{org.name}</span></div>}
+            </div>
+
+            <div className="border-b border-slate-100 p-2">
+              {!pwOpen ? (
+                <button type="button" onClick={() => setPwOpen(true)}
+                  className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left text-sm font-medium text-slate-700 transition hover:bg-slate-100">
+                  <KeyRound className="h-4 w-4 text-slate-500" aria-hidden />Change password
+                </button>
+              ) : demo ? (
+                <div className="px-2 py-2 text-sm">
+                  <p className="flex items-center gap-2 font-medium text-slate-800"><KeyRound className="h-4 w-4 text-slate-500" aria-hidden />Change password</p>
+                  <p className="mt-1 text-xs text-slate-500">This is a shared demo account, so its password cannot be changed.</p>
+                  <button type="button" onClick={reset} className="mt-2 text-xs font-medium text-brand-700 hover:underline">Close</button>
+                </div>
+              ) : (
+                <form onSubmit={savePassword} noValidate className="space-y-2 px-2 py-2">
+                  <p className="flex items-center gap-2 text-sm font-medium text-slate-800"><KeyRound className="h-4 w-4 text-slate-500" aria-hidden />Change password</p>
+                  <div className="relative">
+                    <input type={show ? 'text' : 'password'} autoComplete="new-password" autoFocus placeholder="New password (min 8 characters)" aria-label="New password"
+                      value={pw} onChange={(e) => setPw(e.target.value)} className={`${inp} pr-9`} />
+                    <button type="button" onClick={() => setShow((s) => !s)} aria-label={show ? 'Hide password' : 'Show password'}
+                      className="absolute inset-y-0 right-0 flex items-center px-2.5 text-slate-400 hover:text-slate-700">
+                      {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
+                  <input type={show ? 'text' : 'password'} autoComplete="new-password" placeholder="Confirm new password" aria-label="Confirm new password"
+                    value={pw2} onChange={(e) => setPw2(e.target.value)} className={inp} />
+                  {err && <p role="alert" className="text-xs font-medium text-rose-600">{err}</p>}
+                  <div className="flex justify-end gap-2 pt-1">
+                    <button type="button" onClick={reset} className="rounded-lg px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-100">Cancel</button>
+                    <button type="submit" disabled={busy} className="rounded-lg bg-brand-700 px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-brand-800 disabled:opacity-60">
+                      {busy ? 'Saving…' : 'Update password'}
+                    </button>
+                  </div>
+                </form>
+              )}
+              <button type="button" onClick={() => { close(); nav('/account') }}
+                className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left text-sm font-medium text-slate-700 transition hover:bg-slate-100">
+                <UserCog className="h-4 w-4 text-slate-500" aria-hidden />Account &amp; security
+              </button>
+            </div>
+
+            <div className="p-2">
+              <button type="button" onClick={() => { close(); onSignOut() }}
+                className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left text-sm font-medium text-rose-600 transition hover:bg-rose-50">
+                <LogOut className="h-4 w-4" aria-hidden />Sign out
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  )
 }
 
 export default function AppShell() {
@@ -187,13 +321,9 @@ export default function AppShell() {
             <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${online ? 'bg-red-50 text-red-700 ring-red-200' : 'bg-amber-100 text-amber-800 ring-amber-200'}`} role="status">
               {online ? <><span className="relative h-2 w-2 rounded-full bg-red-500 text-red-500 live-dot" /><Wifi className="h-3.5 w-3.5" aria-hidden />Live</> : <><WifiOff className="h-3.5 w-3.5" aria-hidden />Offline</>}
             </span>
-            <div className="flex items-center gap-3 border-l border-slate-200 pl-3">
-              <div className="hidden min-w-0 text-center sm:block">
-                <p className="translate-y-[3px] truncate text-base font-bold leading-tight tracking-tight text-slate-900">{profile?.full_name}</p>
-                <span className={`mt-1.5 inline-block whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-semibold leading-none ring-1 ring-inset ${ROLE_TONE[profile?.role] || ''}`}>{ROLE_LABEL[profile?.role]}{(profile?.role === 'city_officer' || area) && ` · ${areaLabel(area)}`}{adminScope && ` · ${adminScope === 'owner' ? 'System owner' : 'Security & audit'}`}</span>
-              </div>
-              <div aria-hidden className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-brand-500 to-brand-700 text-sm font-bold text-white">{initials}</div>
-            </div>
+            <ProfileMenu initials={initials} roleLine={`${ROLE_LABEL[profile?.role] || ''}${(profile?.role === 'city_officer' || area) ? ` · ${areaLabel(area)}` : ''}${adminScope ? ` · ${adminScope === 'owner' ? 'System owner' : 'Security & audit'}` : ''}`}
+              onSignOut={async () => { await signOut(); nav('/') }} />
+
           </div>
         </header>
         <main id={mainId} className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
