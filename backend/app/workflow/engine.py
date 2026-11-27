@@ -90,17 +90,23 @@ class WorkflowEngine:
             raise PermanentError("plan not found")
         if plan["status"] not in ("approved", "executing"):
             raise PermanentError(f"plan status is {plan['status']}, expected approved")
-        statuses = tx.incident_statuses(plan["incident_ids"])
-        bad = {k: v for k, v in statuses.items() if v not in ("approved", "in_progress")}
-        if bad:
-            raise PermanentError(f"incidents changed state meanwhile: {bad}")
+        self._assert_incidents_open(tx, plan)
         if not plan["assignments"]:
             raise PermanentError("plan has no assignments")
         tx.set_plan_status(plan["id"], "executing")
         return {"incidents": len(plan["incident_ids"]), "assignments": len(plan["assignments"])}
 
+    @staticmethod
+    def _assert_incidents_open(tx, plan):
+        # Re-checked before every step that commits stock or crews: an admin may resolve a report mid-run.
+        statuses = tx.incident_statuses(plan["incident_ids"])
+        bad = {k: v for k, v in statuses.items() if v not in ("approved", "in_progress")}
+        if bad:
+            raise PermanentError(f"incidents changed state meanwhile: {bad}")
+
     def _step_reserve_resources(self, tx, run):
         plan = tx.load_plan(run["plan_id"])
+        self._assert_incidents_open(tx, plan)
         reserved = []
         for a in plan["assignments"]:
             key = f"run:{run['id']}:g{run.get('generation', 1)}:{a['incident_id']}:{a['resource_id']}"
@@ -112,6 +118,7 @@ class WorkflowEngine:
 
     def _step_create_tasks(self, tx, run):
         plan = tx.load_plan(run["plan_id"])
+        self._assert_incidents_open(tx, plan)
         jobs: dict[str, dict] = defaultdict(dict)
         for a in plan["assignments"]:
             ttype = TASK_TYPE_FOR.get(a["resource_type"], "inspection")
@@ -138,7 +145,9 @@ class WorkflowEngine:
     def _step_notify_teams(self, tx, run):
         workers = tx.workers_for_run(run["id"])
         tx.notify(run["id"], workers)
-        return {"notified": workers, "channel": "in-app realtime"}
+        # Each crew member already has an in-app notification + queued SMS/e-mail from the
+        # task_assignees trigger (migration 023); the outbox sender delivers them after commit.
+        return {"notified": workers, "channel": "in-app + SMS/e-mail outbox"}
 
     def _step_activate_incidents(self, tx, run):
         plan = tx.load_plan(run["plan_id"])

@@ -133,3 +133,15 @@ def test_nobody_fits_task_waits_pending_for_an_officer(store):
     res = WorkflowEngine(store).execute(dict(store.runs["run-1"]))
     assert res["status"] == "succeeded"
     assert all(t["status"] == "pending" and t["assigned_to"] is None for t in store.tasks.values())
+
+
+def test_report_resolved_mid_run_stops_before_reserving_stock(store):
+    eng = WorkflowEngine(store, backoff_base_s=0)
+    store.mark_step("run-1", "validate_plan", 1, "succeeded")
+    store.plans["plan-1"]["status"] = "executing"
+    store.incidents["inc-1"]["status"] = "resolved"
+    res = eng.execute(dict(store.runs["run-1"]))
+    assert res["status"] == "compensated" and "changed state" in res["reason"]
+    assert store.resources["pump"]["available"] == 3 and store.resources["crew"]["available"] == 2
+    assert store.tasks == {} or all(t["status"] == "cancelled" for t in store.tasks.values())
+    assert store.incidents["inc-1"]["status"] == "resolved"

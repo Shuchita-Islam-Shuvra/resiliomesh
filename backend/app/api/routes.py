@@ -147,6 +147,30 @@ def process_now(user: CurrentUser = Depends(require_roles(*OFFICERS))):
     return {"processed": len(results), "results": results}
 
 
+@router.get("/notifications/status")
+def notifications_status(user: CurrentUser = Depends(require_roles("admin"))):
+    from ..services import notifier
+    with db.tx() as conn:
+        rows = db.fetch_all(conn, """select channel, status, count(*)::int n from notification_deliveries
+                                     where created_at > now() - interval '7 days' group by 1, 2 order by 1, 2""")
+        recent = db.fetch_all(conn, """select d.id, d.channel, d.status, d.attempts, d.provider, d.last_error,
+                                              d.created_at, d.sent_at, n.title, n.kind, p.full_name as recipient
+                                         from notification_deliveries d
+                                         join notifications n on n.id = d.notification_id
+                                         join profiles p on p.id = n.recipient_id
+                                        order by d.created_at desc limit 25""")
+    return {"config": notifier.describe_config(), "worker": notifier.status, "last_7_days": rows, "recent": recent}
+
+
+@router.post("/notifications/process-now")
+def notifications_process_now(user: CurrentUser = Depends(require_roles("admin"))):
+    result = worker.send_notifications(f"api-{user.id[:8]}")
+    if result is None:
+        from ..services import notifier
+        raise AppError(503, "NOTIFY_FAILED", notifier.status["last_error"] or "Sending failed, see server logs")
+    return result
+
+
 @router.post("/analytics/import")
 async def import_history(file: UploadFile = File(...), user: CurrentUser = Depends(require_roles("admin", "city_officer"))):
     if not (file.filename or "").lower().endswith(".csv"):

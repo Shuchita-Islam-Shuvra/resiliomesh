@@ -38,6 +38,26 @@ class Settings(BaseSettings):
     worker_poll_s: float = 2.0
     worker_id: str = "worker-1"
 
+    # Notifications: e-mail / SMS copies of in-app notifications (outbox sent by the worker).
+    # "log" = not configured: deliveries are marked "skipped" and only logged, nothing is sent.
+    app_public_url: str = "https://resiliomesh.vercel.app"
+    notify_batch_size: int = 20
+    notify_email_provider: str = "log"          # log | resend | smtp
+    notify_email_from: str = "ResilioMesh <alerts@resiliomesh.app>"
+    resend_api_key: str = ""
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_starttls: bool = True
+    notify_sms_provider: str = "log"            # log | bulksmsbd | twilio
+    bulksmsbd_api_key: str = ""
+    bulksmsbd_sender_id: str = ""
+    bulksmsbd_url: str = "http://bulksmsbd.net/api/smsapi"
+    twilio_account_sid: str = ""
+    twilio_auth_token: str = ""
+    twilio_from: str = ""
+
     model_path: str = str(BACKEND_DIR / "models" / "risk_xgb.json")
     historical_csv: str = str(ROOT_DIR / "data" / "historical_rainfall_events.csv")
     climatology_csv: str = str(ROOT_DIR / "data" / "dhaka_monthly_climatology.csv")

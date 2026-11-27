@@ -14,7 +14,7 @@ const NEED_TYPES = ['relief_kit', 'medical_kit', 'water_tank', 'sandbag', 'boat'
 const AREA_LABEL = { DNCC: 'Dhaka North', DSCC: 'Dhaka South' }
 
 export default function NgoCenterPage() {
-  const { profile, hasRole } = useAuth()
+  const { profile, hasRole, canManageArea } = useAuth()
   const [params, setParams] = useSearchParams()
   const toast = useToast()
   const [needs, setNeeds] = useState(null)
@@ -72,6 +72,17 @@ export default function NgoCenterPage() {
     return null
   }, [isAdmin, hasRole, myArea, areas])
   const owns = (n) => ['home', 'uncovered', 'admin'].includes(access(n))
+  const canConfirm = (n) => !n.confirmed_at && n.submitted_by !== profile.id
+    && (Boolean(access(n)) || (hasRole('city_officer') && canManageArea(n.wards?.city_corporation)))
+  const confirmNeed = async (n) => {
+    setBusy(true)
+    try {
+      const { error } = await supabase.rpc('confirm_need', { p_need_id: n.id })
+      if (error) throw error
+      toast.success('Need confirmed. Relief can now be allocated, and the field worker has been told.')
+      load()
+    } catch (err) { toast.error(errorMessage(err), 'Could not confirm') } finally { setBusy(false) }
+  }
 
   const groups = useMemo(() => {
     const g = { open: [], fulfilled: [], duplicate: [] }
@@ -170,7 +181,10 @@ export default function NgoCenterPage() {
   const list = groups[tab]
   return (
     <>
-      <PageHeader title="NGO coordination center" description="Register community needs, detect duplicate aid requests, and allocate relief from your organisation's stock with race-safe reservations."
+      <PageHeader title="NGO coordination center" description={
+        hasRole('ngo_coordinator') ? "Register community needs, detect duplicate aid requests, and allocate relief from your organisation's stock with race-safe reservations."
+          : isAdmin ? "Register community needs, detect duplicate aid requests, and allocate relief from any organisation's stock with race-safe reservations."
+            : 'Register community needs in your area and confirm needs reported by field workers. NGO coordinators allocate the relief.'}
         actions={<Button onClick={() => { setErrors({}); setForm({ ward_id: '', need_type: 'relief_kit', quantity: '', households: '', contact_name: '', contact_phone: '', notes: '' }) }}><Plus className="h-4 w-4" />Register need</Button>} />
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatCard label="Open needs" value={stats.open} icon={HandHeart} />
@@ -253,7 +267,9 @@ export default function NgoCenterPage() {
               <tbody className="divide-y divide-slate-100">
                 {list.map((n) => (
                   <tr key={n.id}>
-                    <td className="px-3 py-2.5"><p className="font-medium">{n.quantity} × {RESOURCE_LABEL[n.need_type]}</p><p className="max-w-xs truncate text-xs text-slate-500">{n.contact_name || 'Anonymous'}{n.incidents ? ` · ${n.incidents.reference_code}` : ''} · {timeAgo(n.created_at)}</p></td>
+                    <td className="px-3 py-2.5"><p className="font-medium">{n.quantity} × {RESOURCE_LABEL[n.need_type]}</p><p className="max-w-xs truncate text-xs text-slate-500">{n.contact_name || 'Anonymous'}{n.incidents ? ` · ${n.incidents.reference_code}` : ''} · {timeAgo(n.created_at)}</p>
+                      {!n.confirmed_at && ['open', 'partially_fulfilled'].includes(n.status) &&
+                        <span className="mt-0.5 inline-block rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800 ring-1 ring-inset ring-amber-300">From the field · needs confirmation</span>}</td>
                     <td className="px-3 py-2.5">
                       <p>{n.wards?.name}</p>
                       <p className="text-xs text-slate-500">{AREA_LABEL[n.wards?.city_corporation] || ''}</p>
@@ -265,14 +281,17 @@ export default function NgoCenterPage() {
                     <td className="px-3 py-2.5"><StatusBadge status={n.status} /></td>
                     <td className="px-3 py-2.5 text-right">{['open', 'partially_fulfilled'].includes(n.status) && (access(n) ? (
                       <span className="inline-flex flex-wrap justify-end gap-1.5">
-                        <Button size="sm" disabled={n.incidents?.status === 'reported'} title={n.incidents?.status === 'reported' ? 'Waiting for an officer to verify the linked report' : undefined}
-                          onClick={() => setAlloc({ need: n, qty: n.quantity - n.fulfilled_qty, resource_id: '', key: uuid() })}>{n.incidents?.status === 'reported' ? 'Awaiting verification' : access(n) === 'backup' ? 'Help (allocate)' : 'Allocate'}</Button>
+                        {canConfirm(n) && <Button size="sm" loading={busy} onClick={() => confirmNeed(n)}>Confirm</Button>}
+                        <Button size="sm" disabled={!n.confirmed_at || n.incidents?.status === 'reported'}
+                          title={!n.confirmed_at ? 'Reported from the field: confirm it first' : n.incidents?.status === 'reported' ? 'Waiting for an officer to verify the linked report' : undefined}
+                          onClick={() => setAlloc({ need: n, qty: n.quantity - n.fulfilled_qty, resource_id: '', key: uuid() })}>{!n.confirmed_at ? 'Awaiting confirmation' : n.incidents?.status === 'reported' ? 'Awaiting verification' : access(n) === 'backup' ? 'Help (allocate)' : 'Allocate'}</Button>
                         {owns(n) && (n.backup_requested_at
                           ? <Button size="sm" variant="secondary" onClick={() => setConfirm({ kind: 'backup', on: false, item: n })}>Withdraw backup</Button>
                           : <Button size="sm" variant="secondary" onClick={() => { setNote(''); setConfirm({ kind: 'backup', on: true, item: n }) }}>Ask backup</Button>)}
                         {owns(n) && <Button size="sm" variant="secondary" onClick={() => setConfirm({ kind: 'need', item: n })}>Cancel</Button>}
                       </span>
-                    ) : hasRole('ngo_coordinator') && <span className="text-xs text-slate-400">{AREA_LABEL[n.wards?.city_corporation]} team</span>)}</td>
+                    ) : canConfirm(n) ? <Button size="sm" loading={busy} onClick={() => confirmNeed(n)}>Confirm</Button>
+                      : hasRole('ngo_coordinator') && <span className="text-xs text-slate-400">{AREA_LABEL[n.wards?.city_corporation]} team</span>)}</td>
                   </tr>
                 ))}
               </tbody>

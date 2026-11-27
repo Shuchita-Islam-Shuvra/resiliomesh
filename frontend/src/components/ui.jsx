@@ -30,7 +30,7 @@ export function Skeleton({ className = 'h-4 w-full' }) {
 export function Button({ variant = 'primary', size = 'md', loading, className = '', children, ...props }) {
   const v = {
     primary: 'bg-gradient-to-b from-brand-600 to-brand-700 text-white hover:from-brand-700 hover:to-brand-800 disabled:opacity-50',
-    secondary: 'bg-white text-slate-700 ring-1 ring-slate-300 hover:bg-slate-50 disabled:opacity-60',
+    secondary: 'bg-surface text-slate-700 ring-1 ring-slate-300 hover:bg-slate-50 disabled:opacity-60',
     danger: 'bg-rose-600 text-white hover:bg-rose-700 disabled:bg-rose-600/50',
     ghost: 'text-slate-600 hover:bg-slate-100 disabled:opacity-50',
     warning: 'bg-amber-500 text-white hover:bg-amber-600 disabled:opacity-50',
@@ -48,7 +48,7 @@ export function Button({ variant = 'primary', size = 'md', loading, className = 
 export function Card({ title, subtitle, actions, icon: Icon, className = '', bodyClass = 'p-4 sm:p-5', children, index = 0 }) {
   return (
     <motion.section variants={fadeUp} initial="hidden" whileInView="show" viewport={{ once: true, margin: '-40px' }} custom={index}
-      className={`min-w-0 rounded-2xl border border-slate-200/80 bg-white/90 shadow-sm shadow-slate-200/50 backdrop-blur-sm ${className}`}>
+      className={`min-w-0 rounded-2xl border border-slate-200/80 bg-surface/90 shadow-sm shadow-slate-200/50 backdrop-blur-sm ${className}`}>
       {(title || actions) && (
         <header className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-4 py-3 sm:px-5">
           <div className="flex min-w-0 items-center gap-2.5">
@@ -112,14 +112,14 @@ export function StatCard({ label, value, hint, icon: Icon, tone = 'brand', suffi
   const [chip, bar] = TONES[tone] || TONES.brand
   return (
     <motion.div variants={fadeUp} initial="hidden" animate="show" custom={index} whileHover={{ y: -3 }}
-      className="relative min-w-0 overflow-hidden rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm transition-shadow hover:shadow-md">
+      className="relative min-w-0 overflow-hidden rounded-2xl border border-slate-200/80 bg-surface p-4 shadow-sm transition-shadow hover:shadow-md">
       <span className={`absolute inset-x-0 top-0 h-1 bg-gradient-to-r ${bar}`} aria-hidden />
       <div className="flex items-start justify-between gap-2">
         <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</p>
         {Icon && <span className={`rounded-lg p-1.5 ${chip}`}><Icon className="h-4 w-4" aria-hidden /></span>}
       </div>
       <p className="mt-2 truncate text-2xl font-bold text-slate-900"><AnimatedNumber value={value} suffix={suffix} decimals={decimals} /></p>
-      {hint && <p className="mt-0.5 truncate text-xs text-slate-500">{hint}</p>}
+      {hint && <p className="mt-0.5 text-xs leading-snug text-slate-500">{hint}</p>}
     </motion.div>
   )
 }
@@ -141,7 +141,7 @@ export function Field({ label, error, hint, required, children, className = '' }
   )
 }
 
-const inputCls = 'block w-full rounded-lg border-0 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-600 aria-[invalid=true]:ring-rose-500 disabled:bg-slate-50'
+const inputCls = 'block w-full rounded-lg border-0 bg-surface px-3 py-2 text-sm text-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-600 aria-[invalid=true]:ring-rose-500 disabled:bg-slate-50'
 export const Input = (p) => <input {...p} className={`${inputCls} ${p.className || ''}`} />
 export const Textarea = (p) => <textarea {...p} className={`${inputCls} ${p.className || ''}`} />
 export const Select = ({ children, ...p }) => <select {...p} className={`${inputCls} pr-8 ${p.className || ''}`}>{children}</select>
@@ -160,10 +160,10 @@ export function Modal({ open, onClose, title, children, footer, wide, plain }) {
   }, [open])
   if (!open) return null
   return createPortal(
-    <div className={`fixed inset-0 z-[900] flex items-end justify-center ${plain ? 'bg-transparent' : 'bg-slate-900/50'} p-0 sm:items-center sm:p-4`} onMouseDown={(e) => e.target === e.currentTarget && onClose?.()}>
+    <div className={`fixed inset-0 z-[900] flex items-end justify-center ${plain ? 'bg-transparent' : 'bg-ink-900/50 backdrop-blur-[2px] dark:bg-black/75 dark:backdrop-blur-sm'} p-0 sm:items-center sm:p-4`} onMouseDown={(e) => e.target === e.currentTarget && onClose?.()}>
       <div ref={ref} role="dialog" aria-modal="true" aria-label={title}
-        className={`max-h-[92vh] w-full overflow-y-auto rounded-t-3xl sm:rounded-3xl ${plain ? 'bg-brand-900 text-slate-100' : 'bg-white'} ${plain ? 'shadow-2xl ring-1 ring-brand-400/40' : 'shadow-xl'} ${wide ? 'sm:max-w-3xl' : 'sm:max-w-lg'}`}>
-        <div className={`sticky top-0 flex items-center justify-between px-5 py-3 ${plain ? 'bg-gradient-to-r from-brand-700 to-brand-500 text-white py-6' : 'border-b border-slate-100 bg-white'}`}>
+        className={`max-h-[92vh] w-full overflow-y-auto rounded-t-3xl sm:rounded-3xl ${plain ? 'bg-brand-900 text-white/90' : 'bg-surface'} ${plain ? 'shadow-2xl ring-1 ring-brand-400/40' : 'shadow-xl dark:shadow-2xl dark:shadow-black/60 dark:ring-1 dark:ring-white/10'} ${wide ? 'sm:max-w-3xl' : 'sm:max-w-lg'}`}>
+        <div className={`sticky top-0 flex items-center justify-between px-5 py-3 ${plain ? 'bg-gradient-to-r from-brand-700 to-brand-500 text-white py-6' : 'border-b border-slate-100 bg-surface'}`}>
           <h2 className={`font-semibold ${plain ? 'text-white' : 'text-slate-900'}`}>{title}</h2>
           <button onClick={onClose} className={`rounded p-1 ${plain ? 'text-white/80 hover:bg-white/20 hover:text-white' : 'text-slate-400 hover:bg-slate-100 hover:text-slate-700'}`} aria-label="Close dialog"><X className="h-5 w-5" /></button>
         </div>
@@ -213,7 +213,7 @@ export function SortTh({ label, field, sort, onSort, className = '' }) {
   const Icon = !active ? ChevronsUpDown : sort.dir === 'asc' ? ChevronUp : ChevronDown
   return (
     <th scope="col" aria-sort={active ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'} className={`px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 ${className}`}>
-      <button type="button" onClick={() => onSort(field)} className="inline-flex items-center gap-1 rounded hover:text-slate-800">
+      <button type="button" onClick={() => onSort(field)} className="inline-flex items-center gap-1 rounded uppercase tracking-wide hover:text-slate-800">
         {label}<Icon className="h-3.5 w-3.5" aria-hidden />
       </button>
     </th>

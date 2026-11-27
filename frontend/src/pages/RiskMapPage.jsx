@@ -40,7 +40,7 @@ function WardSearch({ wards, focus, onSelect, onClear }) {
       <label htmlFor="ward-search" className="sr-only">Search a ward</label>
       <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400" aria-hidden />
       <input id="ward-search" role="combobox" aria-expanded={open} aria-controls="ward-search-list" autoComplete="off"
-        className="w-full rounded-lg border border-slate-300 bg-white py-2 pl-9 pr-9 text-sm shadow-sm focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-600/20"
+        className="w-full rounded-lg border border-slate-300 bg-surface py-2 pl-9 pr-9 text-sm shadow-sm focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-600/20"
         placeholder="Search a ward, e.g. Motijheel" value={q} onKeyDown={onKey} onFocus={() => setOpen(true)}
         onChange={(e) => { setQ(e.target.value); setHi(0); setOpen(true); if (!e.target.value.trim()) onClear() }} />
       {q && (
@@ -49,7 +49,7 @@ function WardSearch({ wards, focus, onSelect, onClear }) {
         </button>
       )}
       {open && matches.length > 0 && (
-        <ul id="ward-search-list" role="listbox" className="absolute z-[1000] mt-1 max-h-72 w-full overflow-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
+        <ul id="ward-search-list" role="listbox" className="absolute z-[1000] mt-1 max-h-72 w-full overflow-auto rounded-lg border border-slate-200 bg-surface py-1 shadow-lg">
           {matches.map((w, i) => (
             <li key={w.ward_id} role="option" aria-selected={i === hi}>
               <button type="button" onMouseEnter={() => setHi(i)} onClick={() => choose(w)}
@@ -62,14 +62,14 @@ function WardSearch({ wards, focus, onSelect, onClear }) {
         </ul>
       )}
       {open && term && matches.length === 0 && (
-        <p className="absolute z-[1000] mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-500 shadow-lg">No ward matches “{q}”</p>
+        <p className="absolute z-[1000] mt-1 w-full rounded-lg border border-slate-200 bg-surface px-3 py-2 text-sm text-slate-500 shadow-lg">No ward matches “{q}”</p>
       )}
     </div>
   )
 }
 
 const Dot = ({ color, square, size = 12 }) => (
-  <span aria-hidden className="inline-block shrink-0 border-2 border-white shadow-[0_0_0_1px_rgba(15,23,42,.3)]"
+  <span aria-hidden className="inline-block shrink-0 border-2 border-surface shadow-[0_0_0_1px_rgba(15,23,42,.3)]"
     style={{ width: size, height: size, background: color, borderRadius: square ? 2 : 999 }} />
 )
 const Ring = ({ color }) => (
@@ -78,7 +78,7 @@ const Ring = ({ color }) => (
 
 function Legend({ showAssets }) {
   return (
-    <div className="mt-3 grid gap-3 rounded-xl border border-slate-200 bg-white p-4 text-xs text-slate-600 sm:grid-cols-3">
+    <div className="mt-3 grid gap-3 rounded-xl border border-slate-200 bg-surface p-4 text-xs text-slate-600 sm:grid-cols-3">
       <div>
         <p className="mb-1.5 font-semibold text-slate-800">Circles = wards</p>
         <p className="mb-2 text-slate-500">Colour is the AI flood-risk level of the whole ward.</p>
@@ -176,7 +176,7 @@ export default function RiskMapPage() {
 
       <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
         {stats.map(({ label, value, icon: Icon, warn }) => (
-          <div key={label} className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3">
+          <div key={label} className="flex items-center gap-3 rounded-xl border border-slate-200 bg-surface px-4 py-3">
             <Icon className={`h-5 w-5 ${warn && value > 0 ? 'text-rose-600' : 'text-brand-700'}`} aria-hidden />
             <div><p className="text-xl font-bold leading-none text-slate-900">{value}</p><p className="mt-1 text-xs text-slate-500">{label}</p></div>
           </div>
@@ -237,7 +237,7 @@ export default function RiskMapPage() {
                     <ul className="divide-y divide-slate-100">
                       {shownIncidents.slice(0, 6).map((i) => (
                         <li key={i.id}>
-                          <button type="button" disabled={!isStaff} onClick={() => nav(`/incidents/${i.id}`)} className="flex w-full items-center justify-between gap-2 py-1.5 text-left hover:text-brand-700 disabled:cursor-default">
+                          <button type="button" disabled={!isStaff} onClick={() => nav(`/incidents/${i.id}`)} className="flex w-full items-center justify-between gap-2 py-1.5 text-left hover:text-brand-700 dark:hover:text-teal-300 disabled:cursor-default">
                             <span className="truncate">{i.title}</span>
                             {i.risk_level ? <RiskBadge level={i.risk_level} score={i.risk_score} /> : <span className="text-xs text-slate-400">{humanize(i.status)}</span>}
                           </button>

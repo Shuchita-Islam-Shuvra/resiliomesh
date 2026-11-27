@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { ArrowRight, BrainCircuit, CheckCircle2, CloudRain, HandHeart, LayoutDashboard, LogIn, ShieldCheck, Smartphone, UserPlus, Workflow } from 'lucide-react'
 import RoleCapsule from '../components/RoleCapsule'
+import ThemeToggle from '../components/ThemeToggle'
 import { useAuth } from '../context/AuthContext'
 import { ROLE_BY_KEY } from '../lib/roles'
 
@@ -30,10 +31,10 @@ const HIGHLIGHTS = [
 const fadeUp = { hidden: { opacity: 0, y: 24 }, show: { opacity: 1, y: 0 } }
 
 const SLIDES = [
-  { img: '/images/photo-flooded-street.webp', caption: 'City-wide view: AI links rainfall, flooded wards, pumps and relief teams', pan: ['0%', '-3%'] },
-  { img: '/images/photo-flooded-road.webp', caption: 'Live risk map: ward risk, drainage assets and crews on the move', pan: ['-2%', '2%'] },
-  { img: '/images/photo-relief-aid.webp', caption: 'Relief coordination: stock, needs and deliveries across NGOs', pan: ['2%', '-2%'] },
-  { img: '/images/photo-sandbag-crew.webp', caption: 'Field work: tasks on a tablet, saved offline, synced on reconnect', pan: ['0%', '3%'] },
+  { img: '/images/photo-flooded-street.webp', alt: 'A flooded city street during monsoon rain', caption: 'Every monsoon, low-lying wards waterlog within hours', pan: ['0%', '-3%'] },
+  { img: '/images/photo-flooded-road.webp', alt: 'A bus and rickshaws driving through a flooded road', caption: 'AI scores each ward’s flood risk from live rainfall and drainage data', pan: ['-2%', '2%'] },
+  { img: '/images/photo-relief-aid.webp', alt: 'Volunteers handing relief supplies to people', caption: 'NGOs share stock and needs, so no family is served twice', pan: ['2%', '-2%'] },
+  { img: '/images/photo-sandbag-crew.webp', alt: 'Responders in raincoats filling sandbags', caption: 'Field crews get tasks on their phone and keep working offline', pan: ['0%', '3%'] },
 ]
 const SLIDE_MS = 3000
 const FADE_S = 0.7
@@ -50,9 +51,9 @@ function Showcase({ reduce }) {
   return (
     <motion.div className="relative" initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.6, ease: 'easeOut' }}>
       <div aria-hidden className="absolute -inset-4 rounded-[2rem] bg-gradient-to-tr from-brand-200/60 via-sky-200/40 to-transparent blur-2xl" />
-      <div className="relative aspect-[16/9] overflow-hidden rounded-3xl bg-ink-900 shadow-2xl shadow-slate-900/25 ring-1 ring-slate-900/5">
+      <div className="relative aspect-[16/9] overflow-hidden rounded-3xl bg-ink-900 shadow-2xl shadow-ink-900/25 ring-1 ring-ink-900/5">
         <AnimatePresence initial={false}>
-          <motion.img key={s.img} src={s.img} alt={s.caption}
+          <motion.img key={s.img} src={s.img} alt={s.alt}
             className="absolute inset-0 h-full w-full object-cover"
             initial={{ opacity: 0, scale: 1.04, x: s.pan[0] }}
             animate={reduce ? { opacity: 1, scale: 1.04 } : { opacity: 1, scale: 1.16, x: s.pan[1] }}
@@ -71,19 +72,19 @@ function Showcase({ reduce }) {
 }
 
 function RolePicker() {
-  const [role, setRole] = useState('admin')
+  const [role, setRole] = useState('citizen')
   const r = ROLE_BY_KEY[role]
   const Icon = r.icon
   return (
-    <section aria-labelledby="role-heading" className="relative overflow-hidden border-t border-slate-200/70 bg-gradient-to-b from-white to-brand-50/40">
+    <section aria-labelledby="role-heading" className="relative overflow-hidden border-t border-slate-200/70 bg-gradient-to-b from-surface to-brand-50/40">
       <div className="mx-auto flex max-w-6xl flex-col items-center px-4 py-14 sm:px-6 lg:py-20">
         <p className="text-xs font-semibold uppercase tracking-[0.16em] text-brand-700">Choose your portal</p>
         <h2 id="role-heading" className="mt-2 scroll-mt-28 text-center text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">Who are you signing in as?</h2>
         <p className="mx-auto mt-2 max-w-xl text-center text-sm text-slate-600">Every user type gets its own sign-in, sign-up form and workspace.</p>
-        <RoleCapsule value={role} onChange={setRole} className="mt-8 bg-white shadow-lg shadow-slate-200/70" />
+        <RoleCapsule value={role} onChange={setRole} className="mt-8 bg-surface shadow-lg shadow-slate-200/70" />
         <AnimatePresence mode="wait">
           <motion.div key={role} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.22 }}
-            className="mt-6 w-full max-w-2xl rounded-3xl bg-white p-6 shadow-sm ring-1 ring-slate-200 sm:p-8">
+            className="mt-6 w-full max-w-2xl rounded-3xl bg-surface p-6 shadow-sm ring-1 ring-slate-200 sm:p-8">
             <div className="flex items-start gap-4">
               <span className="rounded-2xl bg-brand-50 p-3 text-brand-700 ring-1 ring-inset ring-brand-100"><Icon className="h-6 w-6" aria-hidden /></span>
               <div className="min-w-0">
@@ -99,7 +100,7 @@ function RolePicker() {
                 <LogIn className="h-4 w-4" aria-hidden />Sign in as {r.label}
               </Link>
               {r.selfRegister ? (
-                <Link to={`/register?role=${role}`} className="inline-flex items-center gap-2 rounded-full bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 ring-1 ring-inset ring-slate-300 transition hover:bg-slate-50">
+                <Link to={`/register?role=${role}`} className="inline-flex items-center gap-2 rounded-full bg-surface px-5 py-2.5 text-sm font-semibold text-slate-700 ring-1 ring-inset ring-slate-300 transition hover:bg-slate-50">
                   <UserPlus className="h-4 w-4" aria-hidden />{r.selfRegister === 'request' ? 'Request access' : 'Create account'}
                 </Link>
               ) : (
@@ -119,11 +120,12 @@ export default function HomePage() {
 
   return (
     <div className="h-full overflow-y-auto">
-      <header className="sticky top-0 z-20 border-b border-slate-200/70 bg-white/80 backdrop-blur-md">
+      <header className="sticky top-0 z-20 border-b border-slate-200/70 bg-surface/80 backdrop-blur-md">
         <div className="mx-auto flex h-16 max-w-6xl items-center gap-3 px-4 sm:px-6">
           <img src="/icon.svg" alt="" className="h-9 w-9 rounded-xl" />
           <span className="text-lg font-bold tracking-tight text-slate-900">ResilioMesh</span>
           <nav className="ml-auto flex items-center gap-2" aria-label="Account">
+            <ThemeToggle />
             {session ? (
               <Link to="/dashboard" className="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-700">
                 <LayoutDashboard className="h-4 w-4" aria-hidden />Go to dashboard
@@ -156,7 +158,7 @@ export default function HomePage() {
                 {session ? 'Open dashboard' : 'Create an account'}<ArrowRight className="h-4 w-4" aria-hidden />
               </Link>
               {!session && (
-                <a href="#role-heading" className="inline-flex items-center rounded-lg bg-white px-5 py-3 text-sm font-semibold text-slate-700 ring-1 ring-inset ring-slate-300 transition hover:bg-slate-50">
+                <a href="#role-heading" className="inline-flex items-center rounded-lg bg-surface px-5 py-3 text-sm font-semibold text-slate-700 ring-1 ring-inset ring-slate-300 transition hover:bg-slate-50">
                   Sign in
                 </a>
               )}
@@ -173,13 +175,13 @@ export default function HomePage() {
 
         {!session && <RolePicker />}
 
-        <section className="border-t border-slate-200/70 bg-white/60">
+        <section className="border-t border-slate-200/70 bg-surface/60">
           <div className="mx-auto max-w-6xl px-4 py-14 sm:px-6 lg:py-20">
             <h2 className="text-center text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">Three connected modules</h2>
             <p className="mx-auto mt-2 max-w-2xl text-center text-sm text-slate-600">From a citizen's report to a pump on the street, every step is tracked in one system.</p>
             <div className="mt-10 grid gap-6 md:grid-cols-3">
               {MODULES.map(({ img, icon: Icon, title, text }, i) => (
-                <motion.article key={title} className="group overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200 transition-shadow hover:shadow-lg"
+                <motion.article key={title} className="group overflow-hidden rounded-2xl bg-surface shadow-sm ring-1 ring-slate-200 transition-shadow hover:shadow-lg"
                   initial={{ opacity: 0, y: 30 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true, amount: 0.3 }}
                   transition={{ duration: 0.5, delay: i * 0.12 }}>
                   <div className="aspect-[16/9] overflow-hidden">
@@ -199,11 +201,11 @@ export default function HomePage() {
         <section className="relative isolate overflow-hidden bg-ink-900">
           <img src="/images/photo-sandbag-street-bw.webp" alt="Responders building a sandbag barrier beside a flooded street" loading="lazy" decoding="async"
             className="absolute inset-0 -z-10 h-full w-full object-cover opacity-60" />
-          <div aria-hidden className="absolute inset-0 -z-10 bg-gradient-to-r from-slate-950/90 via-slate-950/60 to-transparent" />
+          <div aria-hidden className="absolute inset-0 -z-10 bg-gradient-to-r from-ink-900/90 via-ink-900/60 to-transparent" />
           <div className="mx-auto max-w-6xl px-4 py-20 sm:px-6 lg:py-28">
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-brand-200">Why it matters</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-teal-200">Why it matters</p>
             <h2 className="mt-3 max-w-xl text-3xl font-bold leading-tight tracking-tight text-white sm:text-4xl">When the water rises, the first hour decides everything.</h2>
-            <p className="mt-4 max-w-lg text-sm text-slate-200 sm:text-base">Streets flood, crews improvise, and help arrives unevenly. ResilioMesh points people and supplies to the wards that need them first.</p>
+            <p className="mt-4 max-w-lg text-sm text-white/85 sm:text-base">Streets flood, crews improvise, and help arrives unevenly. ResilioMesh points people and supplies to the wards that need them first.</p>
           </div>
         </section>
 
@@ -213,7 +215,7 @@ export default function HomePage() {
             <p className="mt-2 text-sm text-slate-600">Citizens can sign up in a minute. Staff accounts are created by an administrator.</p>
             <div className="mt-6 flex flex-wrap justify-center gap-3">
               <Link to="/register" className="rounded-lg bg-brand-600 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-700">Sign up</Link>
-              <Link to="/login" className="rounded-lg bg-white px-5 py-3 text-sm font-semibold text-slate-700 ring-1 ring-inset ring-slate-300 transition hover:bg-slate-50">Sign in</Link>
+              <Link to="/login" className="rounded-lg bg-surface px-5 py-3 text-sm font-semibold text-slate-700 ring-1 ring-inset ring-slate-300 transition hover:bg-slate-50">Sign in</Link>
             </div>
           </section>
         )}

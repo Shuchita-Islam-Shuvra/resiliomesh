@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { AlarmClock, CheckCircle2, CloudOff, Crown, GitMerge, Hand, MapPin, Phone, PlayCircle, Power, RefreshCw, Search, ThumbsUp, Users, XCircle } from 'lucide-react'
+import { AlarmClock, CheckCircle2, CloudOff, Crown, GitMerge, Hand, HandHeart, MapPin, Phone, PlayCircle, Power, RefreshCw, Search, ThumbsUp, Users, XCircle } from 'lucide-react'
+import FieldNeedModal from '../components/FieldNeedModal'
 import { Alert, Button, Card, EmptyState, Field, Input, Modal, PageHeader, Select, Spinner, StatusBadge, Textarea } from '../components/ui'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
@@ -38,6 +39,7 @@ export default function FieldPortalPage() {
   const [view, setView] = useState('all')
   const [q, setQ] = useState('')
   const [sortBy, setSortBy] = useState('due')
+  const [needOpen, setNeedOpen] = useState(false)
   const inFlight = useRef(new Set())
   const known = useRef(null)
   const onDuty = profile.on_duty !== false
@@ -50,7 +52,7 @@ export default function FieldPortalPage() {
 
   const fetchServer = useCallback(async () => {
     const { data, error } = await supabase.from('tasks')
-      .select('*, incidents(reference_code,title,lat,lng,water_depth_cm,wards(name)), me:task_assignees!inner(worker_id), crew:task_assignees(is_lead, worker:profiles!task_assignees_worker_id_fkey(id,full_name,phone,field_team))')
+      .select('*, incidents(reference_code,title,lat,lng,water_depth_cm,ward_id,wards(name)), me:task_assignees!inner(worker_id), crew:task_assignees(is_lead, worker:profiles!task_assignees_worker_id_fkey(id,full_name,phone,field_team))')
       .eq('me.worker_id', profile.id).order('updated_at', { ascending: false })
     if (error) throw error
     const rows = data.map((t) => { const { me: _me, ...rest } = t; return { ...rest, crew: sortCrew(t.crew) } })
@@ -167,7 +169,9 @@ export default function FieldPortalPage() {
             <Power className="h-4 w-4" />{onDuty ? 'On duty' : 'Off duty'}
           </Button>
           <Button variant="secondary" loading={syncing} disabled={!online} onClick={() => sync(false)}><RefreshCw className="h-4 w-4" />Sync now</Button>
+          <Button variant="warning" disabled={!online} onClick={() => setNeedOpen(true)} title="Tell the NGO coordinators what people here need"><HandHeart className="h-4 w-4" />People need help</Button>
         </div>} />
+      <FieldNeedModal open={needOpen} onClose={() => setNeedOpen(false)} tasks={tasks} online={online} />
       {!onDuty && <Alert tone="warning" className="mb-4" title="You are off duty">No new tasks will be assigned to you. Tasks you already have stay here until they are done.</Alert>}
       {profile.field_team && <p className="-mt-2 mb-4 text-sm text-slate-500">Team: <strong className="text-slate-700">{profile.field_team}</strong>. You get tasks that match this team.</p>}
       {!online && <Alert tone="warning" className="mb-4" title="Offline mode"><CloudOff className="mr-1 inline h-4 w-4" aria-hidden />Showing tasks cached {cachedAt ? timeAgo(cachedAt) : 'earlier'}. Your updates are stored on this device.</Alert>}
@@ -180,7 +184,7 @@ export default function FieldPortalPage() {
               <div role="group" aria-label="Show tasks" className="flex flex-wrap gap-1">
                 {Object.entries(TASK_VIEWS).map(([k, v]) => (
                   <button key={k} type="button" aria-pressed={view === k} onClick={() => setView(k)}
-                    className={`rounded-full px-3 py-1.5 text-xs font-medium ring-1 ring-inset transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 ${view === k ? 'bg-brand-700 text-white ring-brand-700' : 'bg-white text-slate-600 ring-slate-200 hover:bg-slate-50'} ${k === 'overdue' && counts.overdue > 0 && view !== k ? '!text-red-700 !ring-red-200' : ''}`}>
+                    className={`rounded-full px-3 py-1.5 text-xs font-medium ring-1 ring-inset transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 ${view === k ? 'bg-brand-700 text-white ring-brand-700' : 'bg-surface text-slate-600 ring-slate-200 hover:bg-slate-50'} ${k === 'overdue' && counts.overdue > 0 && view !== k ? '!text-red-700 !ring-red-200' : ''}`}>
                     {v.label} <span className="tabular-nums opacity-75">{counts[k]}</span>
                   </button>
                 ))}

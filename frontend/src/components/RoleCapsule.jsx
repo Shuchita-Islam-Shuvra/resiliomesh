@@ -38,15 +38,17 @@ export default function RoleCapsule({ value, onChange, dark = false, compact = f
           <button key={r.key} ref={(el) => { refs.current[i] = el }} type="button" role="tab"
             aria-selected={active} tabIndex={active ? 0 : -1} onClick={() => onChange(r.key)}
             aria-label={r.label} title={r.label}
-            className={`relative flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full ${compact ? 'flex-1 justify-center px-3 py-2' : 'px-3.5 py-2'} text-sm font-semibold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-brand-500 ${
-              active ? (dark ? 'text-slate-900' : 'text-white') : (dark ? 'text-slate-200 hover:text-white' : 'text-slate-600 hover:text-slate-900')}`}>
+            className={`relative flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full ${compact ? 'flex-1 justify-center px-3 py-2' : 'px-2.5 py-2 sm:px-3.5'} text-xs font-semibold outline-none sm:text-sm transition-colors focus-visible:ring-2 focus-visible:ring-brand-500 ${
+              active ? (dark ? 'text-ink-900' : 'text-white') : (dark ? 'text-white/80 hover:text-white' : 'text-slate-600 hover:text-slate-900')}`}>
             {active && (
               <motion.span layoutId={`capsule-${group}`} aria-hidden
                 className={`absolute inset-0 rounded-full shadow-md ${dark ? 'bg-white' : 'bg-gradient-to-b from-brand-600 to-brand-700 shadow-brand-900/20'}`}
                 transition={{ type: 'spring', stiffness: 420, damping: 34 }} />
             )}
-            <Icon className="relative h-4 w-4" aria-hidden />
-            <span className={`relative ${active ? '' : 'hidden sm:inline'}`}>{compact ? r.short : r.label}</span>
+            <Icon className={`relative h-4 w-4 ${active ? '' : 'hidden sm:block'}`} aria-hidden />
+            {compact
+              ? <span className="relative">{r.short}</span>
+              : <span className="relative"><span className="sm:hidden">{r.short}</span><span className="hidden sm:inline">{r.label}</span></span>}
           </button>
         )
       })}

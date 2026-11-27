@@ -86,16 +86,20 @@ function IncidentsTab() {
         <div className="overflow-x-auto">
           <table className="min-w-full text-sm">
             <thead className="bg-slate-50"><tr>
-              <Th>Ward</Th><Th>Status</Th>
+              <Th>Report</Th><Th className="hidden lg:table-cell">Ward</Th><Th>Status</Th>
               <SortTh label="Risk" field="risk_score" sort={sort} onSort={onSort} />
               <SortTh label="Priority" field="priority" sort={sort} onSort={onSort} className="hidden md:table-cell" />
               <SortTh label="People" field="people_affected" sort={sort} onSort={onSort} className="hidden md:table-cell" />
-              <Th><span className="sr-only">Report</span></Th>
+              <Th><span className="sr-only">Actions</span></Th>
             </tr></thead>
             <tbody className="divide-y divide-slate-100">
               {rows.map((r) => (
                 <tr key={r.id} className="hover:bg-slate-50">
-                  <td className="px-3 py-2.5 font-medium text-slate-900">{r.wards?.name}</td>
+                  <td className="max-w-xs px-3 py-2.5">
+                    <p className="font-medium text-slate-900 line-clamp-2">{r.title}</p>
+                    <p className="text-xs text-slate-500">{r.reference_code}<span className="lg:hidden"> · {r.wards?.name}</span></p>
+                  </td>
+                  <td className="hidden px-3 py-2.5 text-slate-700 lg:table-cell">{r.wards?.name}</td>
                   <td className="px-3 py-2.5"><StatusBadge status={r.status} /></td>
                   <td className="px-3 py-2.5"><RiskBadge level={r.risk_level} score={r.risk_score} /></td>
                   <td className="hidden px-3 py-2.5 md:table-cell">{r.priority ?? '—'}</td>
@@ -103,7 +107,7 @@ function IncidentsTab() {
                   <td className="px-3 py-2.5 text-right">
                     <button type="button" onClick={() => setView(r)} aria-label={`View report ${r.reference_code}`}
                       className="rounded-full border border-brand-600 px-3.5 py-1 text-xs font-semibold text-brand-700 transition hover:bg-brand-600 hover:text-white focus:outline-none focus:ring-2 focus:ring-brand-500">
-                      Report
+                      View
                     </button>
                   </td>
                 </tr>

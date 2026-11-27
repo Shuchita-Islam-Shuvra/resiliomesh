@@ -12,6 +12,8 @@ import { flushOutbox } from '../offline/sync'
 import { supabase } from '../lib/supabase'
 import { areaLabel } from '../lib/areas'
 import { ROLE_LABEL } from '../lib/format'
+import NotificationBell from './NotificationBell'
+import ThemeToggle from './ThemeToggle'
 import { Spinner } from './ui'
 
 const COORD = ['city_officer', 'ngo_coordinator', 'admin']
@@ -86,7 +88,7 @@ export default function AppShell() {
 
   const initials = profile?.full_name?.split(' ').map((p) => p[0]).slice(0, 2).join('')
   const sidebar = (layoutGroup, mini = false) => (
-    <nav aria-label="Main" className="flex h-full flex-col overflow-hidden border-r border-slate-200 bg-white text-slate-700">
+    <nav aria-label="Main" className="flex h-full flex-col overflow-hidden border-r border-slate-200 bg-surface text-slate-700">
       <div className={`flex items-center gap-3 py-6 ${mini ? 'justify-center px-2' : 'px-6'}`}>
         <motion.img src="/icon.svg" alt="" className="h-10 w-10 shrink-0 rounded-xl"
           initial={{ rotate: -12, scale: 0.8 }} animate={{ rotate: 0, scale: 1 }} transition={{ type: 'spring', stiffness: 220, damping: 14 }} />
@@ -163,7 +165,7 @@ export default function AppShell() {
       <AnimatePresence>
         {open && (
           <motion.div className="fixed inset-0 z-[950] lg:hidden" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-            <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setOpen(false)} />
+            <div className="absolute inset-0 bg-ink-900/60 backdrop-blur-sm" onClick={() => setOpen(false)} />
             <motion.div className="relative h-full w-72 max-w-[85%]" initial={{ x: -300 }} animate={{ x: 0 }} exit={{ x: -300 }} transition={{ type: 'spring', stiffness: 320, damping: 32 }}>
               {sidebar('mobile')}
               <button onClick={() => setOpen(false)} className="absolute right-3 top-6 rounded p-1 text-slate-500 hover:text-slate-900" aria-label="Close menu"><X className="h-5 w-5" /></button>
@@ -173,13 +175,15 @@ export default function AppShell() {
       </AnimatePresence>
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <header className="z-[500] flex h-14 shrink-0 items-center gap-3 border-b border-slate-200/80 bg-white/80 px-4 backdrop-blur-md sm:px-6">
+        <header className="z-[500] flex h-14 shrink-0 items-center gap-3 border-b border-slate-200/80 bg-surface/80 px-4 backdrop-blur-md sm:px-6">
           <button className="rounded p-1.5 text-slate-600 hover:bg-slate-100 lg:hidden" onClick={() => setOpen(true)} aria-label="Open menu"><Menu className="h-5 w-5" /></button>
           <div className="flex items-center gap-2 text-sm text-slate-500">
             <CloudRain className="h-4 w-4 text-brand-600" aria-hidden />
             <span className="hidden sm:inline"><Clock /></span>
           </div>
-          <div className="ml-auto flex items-center gap-3">
+          <div className="ml-auto flex items-center gap-2 sm:gap-3">
+            <ThemeToggle />
+            <NotificationBell />
             <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${online ? 'bg-red-50 text-red-700 ring-red-200' : 'bg-amber-100 text-amber-800 ring-amber-200'}`} role="status">
               {online ? <><span className="relative h-2 w-2 rounded-full bg-red-500 text-red-500 live-dot" /><Wifi className="h-3.5 w-3.5" aria-hidden />Live</> : <><WifiOff className="h-3.5 w-3.5" aria-hidden />Offline</>}
             </span>

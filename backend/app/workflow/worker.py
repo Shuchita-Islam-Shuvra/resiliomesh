@@ -39,7 +39,21 @@ def loop(poll_s: float | None = None, worker_id: str | None = None) -> None:
         except Exception:
             status["errors"] += 1
             log.exception("worker iteration failed")
+        send_notifications(worker_id)
         _stop.wait(poll_s)
+
+
+def send_notifications(worker_id: str) -> dict | None:
+    """E-mail / SMS outbox; isolated so a mail or SMS outage never stalls dispatch."""
+    from ..services import notifier
+    try:
+        result = notifier.run_pending(worker_id=worker_id)
+        notifier.status["last_error"] = None
+        return result
+    except Exception as exc:
+        notifier.status["last_error"] = str(exc)[:300]
+        log.exception("notification sending failed")
+        return None
 
 
 def start_background() -> threading.Thread:

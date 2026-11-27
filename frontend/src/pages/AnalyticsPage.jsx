@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Activity, BarChart3, CalendarRange, CheckCircle2, CloudRain, Copy, Database, Download, Gauge, Layers, MapPinned, Timer, Upload } from 'lucide-react'
+import { Activity, BarChart3, Boxes, CalendarRange, CheckCircle2, CloudRain, Copy, Database, Download, Gauge, HandHeart, Layers, MapPinned, Timer, Upload } from 'lucide-react'
 import {
-  Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, ComposedChart, Line, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
+  Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, ComposedChart, LabelList, Line, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts'
 import { Alert, Button, Card, PageHeader, Select, Spinner, StatCard } from '../components/ui'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
 import { api } from '../lib/api'
 import { errorMessage } from '../lib/errors'
-import { CATEGORY_LABEL, RISK_COLOR, fmtNum, humanize } from '../lib/format'
+import { areaLabel } from '../lib/areas'
+import { CATEGORY_LABEL, RESOURCE_LABEL, RISK_COLOR, fmtNum, humanize } from '../lib/format'
 import { supabase } from '../lib/supabase'
 
 const STATUS_COLOR = {
@@ -17,13 +18,22 @@ const STATUS_COLOR = {
 }
 const CAT_COLOR = ['#0f766e', '#0284c7', '#d97706', '#dc2626', '#7c3aed']
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-const AXIS = { fontSize: 11, fill: '#64748b' }
-const GRID = <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
+// One colour per relief item; "asked for" is an outlined light bar, "delivered" the solid one.
+const RESOURCE_COLOR = {
+  relief_kit: '#f59e0b', medical_kit: '#e11d48', water_tank: '#0ea5e9', sandbag: '#65a30d',
+  boat: '#8b5cf6', pump: '#14b8a6', crew: '#6366f1',
+}
+const ASKED_OPACITY = 0.2
+const AXIS = { fontSize: 11, fill: 'var(--color-slate-500)' }
+// Numbers printed on bars: slate-700 is dark grey in light mode and near-white in dark mode.
+const VALUE_LABEL = { fill: 'var(--color-slate-700)', fillOpacity: 1, stroke: 'none', fontSize: 11, fontWeight: 600 }
+const round = (v) => (v === null || v === undefined ? '' : Math.round(v))
+const GRID = <CartesianGrid strokeDasharray="3 3" stroke="var(--color-slate-200)" vertical={false} />
 
 function ChartTip({ active, payload, label, labelFmt }) {
   if (!active || !payload?.length) return null
   return (
-    <div className="rounded-xl border border-slate-200 bg-white/95 px-3 py-2 text-xs shadow-lg backdrop-blur">
+    <div className="rounded-xl border border-slate-200 bg-surface/95 px-3 py-2 text-xs shadow-lg backdrop-blur">
       <p className="mb-1 font-semibold text-slate-800">{labelFmt ? labelFmt(label) : label}</p>
       {payload.map((p) => (
         <p key={p.dataKey} className="flex items-center gap-2 text-slate-600">
@@ -39,7 +49,7 @@ const ChartBox = ({ h = 'h-72', children }) => <div className={`${h} w-full min-
 const Empty = ({ text = 'No data in this window' }) => <div className="flex h-full items-center justify-center text-sm text-slate-400">{text}</div>
 
 export default function AnalyticsPage() {
-  const { hasRole } = useAuth()
+  const { hasRole, area } = useAuth()
   const toast = useToast()
   const [days, setDays] = useState(30)
   const [ward, setWard] = useState('')
@@ -61,13 +71,22 @@ export default function AnalyticsPage() {
     if (error) setErr(errorMessage(error)); else { setErr(''); setD(data) }
   }, [days, ward])
   useEffect(() => { load() }, [load])
-  useEffect(() => { supabase.from('wards').select('id,name').order('name').then(({ data }) => setWards(data || [])) }, [])
+  useEffect(() => { supabase.from('wards').select('id,name,city_corporation').order('name').then(({ data }) => setWards(data || [])) }, [])
 
   const statusData = useMemo(() => Object.entries(d?.by_status || {}).map(([k, v]) => ({ key: k, name: humanize(k), value: v })), [d])
   const statusTotal = statusData.reduce((s, x) => s + x.value, 0)
   const monthly = useMemo(() => (d?.historical?.monthly || []).map((m) => ({ ...m, label: MONTHS[m.month - 1] })), [d])
   const byWard = useMemo(() => (d?.by_ward || []).slice().sort((a, b) => (b.current_risk_score || 0) - (a.current_risk_score || 0)).slice(0, 12), [d])
+  // Fixed incident scale, so a risk-score label can be lifted clear of the incidents line where they meet.
+  const incidentMax = Math.max(4, Math.ceil(Math.max(0, ...byWard.map((w) => w.incidents || 0)) * 1.2))
   const daily = d?.daily || []
+  // officers only see their own area: offer only those wards
+  const wardOptions = useMemo(() => (hasRole('city_officer') && area ? wards.filter((w) => w.city_corporation === area) : wards), [wards, area, hasRole])
+  const scopeLabel = ward ? (wards.find((w) => w.id === ward)?.name || 'this ward') : hasRole('city_officer') ? areaLabel(area) : 'All Dhaka'
+  const relief = d?.relief || {}
+  const reliefByType = (relief.by_type || []).map((x) => ({ ...x, label: RESOURCE_LABEL[x.need_type] || humanize(x.need_type), color: RESOURCE_COLOR[x.need_type] || '#64748b' }))
+  const workflowData = Object.entries(d?.workflows || {}).map(([k, v]) => ({ key: k, name: humanize(k), value: v }))
+  const isNgo = hasRole('ngo_coordinator')
   const hasDaily = daily.some((x) => x.reported || x.resolved)
 
   const exportCsv = () => {
@@ -91,18 +110,17 @@ export default function AnalyticsPage() {
 
   if (!d && !err) return <Spinner label="Aggregating analytics…" />
   const t = d?.totals || {}
-  const resolutionRate = t.incidents ? Math.round((100 * (t.resolved || 0)) / Math.max(1, t.incidents - (t.duplicates || 0))) : 0
 
   return (
     <>
       <PageHeader eyebrow="Intelligence" title="Advanced analytics"
-        description={`Server-side aggregation over live operations and ${fmtNum(d?.historical?.total_records)} historical flood records.`}
+        description={`${scopeLabel} · last ${days} days (Dhaka time). Live operations, plus ${fmtNum(d?.historical?.total_records)} simulated historical flood records for trends.`}
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <label className="sr-only" htmlFor="an-days">Time window</label>
             <Select id="an-days" value={days} onChange={(e) => setDays(e.target.value)} className="!w-auto"><option value={7}>Last 7 days</option><option value={30}>Last 30 days</option><option value={90}>Last 90 days</option><option value={365}>Last year</option></Select>
             <label className="sr-only" htmlFor="an-ward">Ward</label>
-            <Select id="an-ward" value={ward} onChange={(e) => setWard(e.target.value)} className="!w-auto max-w-[200px]"><option value="">All wards</option>{wards.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</Select>
+            <Select id="an-ward" value={ward} onChange={(e) => setWard(e.target.value)} className="!w-auto max-w-[200px]"><option value="">All wards</option>{wardOptions.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</Select>
             <Button variant="secondary" onClick={exportCsv}><Download className="h-4 w-4" />Export</Button>
           </div>
         }>
@@ -111,16 +129,18 @@ export default function AnalyticsPage() {
       {err && <Alert tone="error" className="mb-4">{err}</Alert>}
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-        <StatCard index={0} label="Incidents" value={t.incidents ?? 0} icon={Activity} />
-        <StatCard index={1} label="Active now" value={t.active ?? 0} icon={Layers} tone="sky" />
-        <StatCard index={2} label="Resolved" value={t.resolved ?? 0} hint={`${resolutionRate}% resolution rate`} icon={CheckCircle2} tone="green" />
-        <StatCard index={3} label="Duplicates merged" value={t.duplicates ?? 0} icon={Copy} tone="violet" />
-        <StatCard index={4} label="Avg risk" value={t.avg_risk ?? '—'} decimals={1} icon={Gauge} tone="amber" />
-        <StatCard index={5} label="Avg resolution" value={t.avg_resolution_hours ?? '—'} decimals={1} suffix=" h" hint={`P90 ${t.p90_resolution_hours ?? '—'} h`} icon={Timer} tone="red" />
+        <StatCard index={0} label="New reports" value={t.reports ?? 0} hint="In this period, duplicates left out" icon={Activity} />
+        <StatCard index={1} label="Open now" value={t.open_now ?? 0} hint="Every open report, however old" icon={Layers} tone="sky" />
+        <StatCard index={2} label="Resolved" value={t.resolved ?? 0} hint={t.resolution_rate != null ? `In this period · ${t.resolution_rate}% of its genuine reports done` : 'In this period'} icon={CheckCircle2} tone="green" />
+        <StatCard index={3} label="Duplicates merged" value={t.duplicates ?? 0} hint={`${t.rejected ?? 0} rejected as false`} icon={Copy} tone="violet" />
+        <StatCard index={4} label="Avg risk" value={t.avg_risk ?? '—'} decimals={1} hint="Of this period's reports" icon={Gauge} tone="amber" />
+        <StatCard index={5} label="Avg resolution" value={t.avg_resolution_hours ?? '—'} decimals={1} suffix=" h" hint={`Report to resolved · P90 ${t.p90_resolution_hours ?? '—'} h`} icon={Timer} tone="red" />
       </div>
 
+      {isNgo && <ReliefSection relief={relief} data={reliefByType} className="mt-5" />}
+
       <div className="mt-5 grid gap-5">
-        <Card index={1} icon={CalendarRange} title="Daily reports vs resolutions" subtitle={`Last ${days} days${ward ? ' · filtered ward' : ''}`}>
+        <Card index={1} icon={CalendarRange} title="Daily reports vs resolutions" subtitle={`${scopeLabel} · Dhaka days · a report counts on the day it came in, a resolution on the day it was resolved`}>
           <ChartBox h="h-72">
             {!hasDaily ? <Empty text="No reports in this window — try a longer period" /> : (
               <ResponsiveContainer>
@@ -142,7 +162,7 @@ export default function AnalyticsPage() {
         </Card>
 
         <div className="grid gap-5 lg:grid-cols-2">
-          <Card index={2} icon={Layers} title="Status mix" subtitle="Where incidents are in the workflow">
+          <Card index={2} icon={Layers} title="Status mix" subtitle="This period's reports, by where they are now (duplicates included)">
             <div className="grid items-center gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
               <ChartBox h="h-56">
                 {!statusTotal ? <Empty /> : (
@@ -167,17 +187,18 @@ export default function AnalyticsPage() {
             </div>
           </Card>
 
-          <Card index={3} icon={BarChart3} title="Reports by category" subtitle="Excluding duplicates">
+          <Card index={3} icon={BarChart3} title="Reports by category" subtitle="This period, duplicates left out">
             <ChartBox h="h-56">
               {!(d?.by_category || []).length ? <Empty /> : (
                 <ResponsiveContainer>
-                  <BarChart data={(d?.by_category || []).map((c) => ({ ...c, label: CATEGORY_LABEL[c.category] }))} layout="vertical" margin={{ top: 4, right: 16, left: 8, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" horizontal={false} />
+                  <BarChart data={(d?.by_category || []).map((c) => ({ ...c, label: CATEGORY_LABEL[c.category] }))} layout="vertical" margin={{ top: 4, right: 32, left: 8, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--color-slate-200)" horizontal={false} />
                     <XAxis type="number" allowDecimals={false} tick={AXIS} tickLine={false} axisLine={false} />
                     <YAxis type="category" dataKey="label" width={110} tick={AXIS} tickLine={false} axisLine={false} />
-                    <Tooltip content={<ChartTip />} cursor={{ fill: '#f1f5f9' }} />
+                    <Tooltip content={<ChartTip />} cursor={{ fill: 'var(--color-slate-100)' }} />
                     <Bar dataKey="count" name="Reports" radius={[0, 6, 6, 0]} barSize={18} animationDuration={900}>
                       {(d?.by_category || []).map((c, i) => <Cell key={c.category} fill={CAT_COLOR[i % CAT_COLOR.length]} />)}
+                      <LabelList dataKey="count" position="right" style={VALUE_LABEL} />
                     </Bar>
                   </BarChart>
                 </ResponsiveContainer>
@@ -189,19 +210,20 @@ export default function AnalyticsPage() {
         <Card index={4} icon={MapPinned} title="Ward risk vs incident load" subtitle="Top 12 wards by current AI risk score">
           <ChartBox h="h-80">
             <ResponsiveContainer>
-              <ComposedChart data={byWard} margin={{ top: 8, right: 4, left: -18, bottom: 0 }}>
+              <ComposedChart data={byWard} margin={{ top: 20, right: 4, left: -18, bottom: 0 }}>
                 {GRID}
                 <XAxis dataKey="name" tick={{ ...AXIS, fontSize: 10 }} tickLine={false} axisLine={false} interval={0} angle={-35} textAnchor="end" height={70} />
-                <YAxis yAxisId="l" allowDecimals={false} tick={AXIS} tickLine={false} axisLine={false} />
+                <YAxis yAxisId="l" domain={[0, incidentMax]} allowDecimals={false} tick={AXIS} tickLine={false} axisLine={false} />
                 <YAxis yAxisId="r" orientation="right" domain={[0, 100]} tick={AXIS} tickLine={false} axisLine={false} />
-                <Tooltip content={<ChartTip />} cursor={{ fill: '#f1f5f9' }} />
+                <Tooltip content={<ChartTip />} cursor={{ fill: 'var(--color-slate-100)' }} />
                 <Bar yAxisId="r" dataKey="current_risk_score" name="Ward risk" radius={[6, 6, 0, 0]} barSize={22} animationDuration={900}>
                   {byWard.map((w) => {
                     const s = w.current_risk_score || 0
                     return <Cell key={w.ward_id} fill={RISK_COLOR[s >= 75 ? 'critical' : s >= 55 ? 'high' : s >= 35 ? 'moderate' : 'low']} fillOpacity={0.85} />
                   })}
+                  <LabelList dataKey="current_risk_score" content={<WardScoreLabel wards={byWard} incidentMax={incidentMax} />} />
                 </Bar>
-                <Line yAxisId="l" type="monotone" dataKey="incidents" name="Incidents" stroke="#0f172a" strokeWidth={2} dot={{ r: 3 }} animationDuration={900} />
+                <Line yAxisId="l" type="monotone" dataKey="incidents" name="Incidents" stroke="var(--color-slate-900)" strokeWidth={2} dot={{ r: 3 }} animationDuration={900} />
               </ComposedChart>
             </ResponsiveContainer>
           </ChartBox>
@@ -212,7 +234,7 @@ export default function AnalyticsPage() {
         </Card>
 
         <div className="grid gap-5 xl:grid-cols-5">
-          <Card index={5} icon={CloudRain} title="Monsoon seasonality" subtitle={`${fmtNum(d?.historical?.total_records)} historical events · count and mean rainfall per month`} className="xl:col-span-3">
+          <Card index={5} icon={CloudRain} title="Monsoon seasonality" subtitle={`${scopeLabel} · ${fmtNum(d?.historical?.total_records)} simulated events · count and mean rainfall per month`} className="xl:col-span-3">
             <ChartBox h="h-72">
               <ResponsiveContainer>
                 <ComposedChart data={monthly} margin={{ top: 8, right: 4, left: -18, bottom: 0 }}>
@@ -221,14 +243,14 @@ export default function AnalyticsPage() {
                   <XAxis dataKey="label" tick={AXIS} tickLine={false} axisLine={false} />
                   <YAxis yAxisId="l" tick={AXIS} tickLine={false} axisLine={false} />
                   <YAxis yAxisId="r" orientation="right" tick={AXIS} tickLine={false} axisLine={false} unit=" mm" width={56} />
-                  <Tooltip content={<ChartTip />} cursor={{ fill: '#f1f5f9' }} />
+                  <Tooltip content={<ChartTip />} cursor={{ fill: 'var(--color-slate-100)' }} />
                   <Bar yAxisId="l" dataKey="events" name="Events" fill="url(#gEv)" radius={[6, 6, 0, 0]} animationDuration={900} />
                   <Line yAxisId="r" type="monotone" dataKey="avg_rainfall_mm" name="Avg rainfall (mm)" stroke="#d97706" strokeWidth={2.5} dot={false} animationDuration={900} />
                 </ComposedChart>
               </ResponsiveContainer>
             </ChartBox>
           </Card>
-          <Card index={6} icon={CalendarRange} title="Events per year" subtitle="All wards, historical record" className="xl:col-span-2">
+          <Card index={6} icon={CalendarRange} title="Events per year" subtitle={`${scopeLabel} · simulated historical record`} className="xl:col-span-2">
             <ChartBox h="h-72">
               <ResponsiveContainer>
                 <BarChart data={d?.historical?.yearly || []} margin={{ top: 8, right: 4, left: -18, bottom: 0 }}>
@@ -236,13 +258,48 @@ export default function AnalyticsPage() {
                   {GRID}
                   <XAxis dataKey="year" tick={AXIS} tickLine={false} axisLine={false} minTickGap={8} />
                   <YAxis tick={AXIS} tickLine={false} axisLine={false} />
-                  <Tooltip content={<ChartTip />} cursor={{ fill: '#f1f5f9' }} />
+                  <Tooltip content={<ChartTip />} cursor={{ fill: 'var(--color-slate-100)' }} />
                   <Bar dataKey="events" name="Events" fill="url(#gYr)" radius={[6, 6, 0, 0]} animationDuration={900} />
                 </BarChart>
               </ResponsiveContainer>
             </ChartBox>
           </Card>
         </div>
+        {d?.historical?.synthetic && (
+          <p className="-mt-2 text-xs text-slate-500">
+            The two charts above use simulated history: no open, ward-level waterlogging record exists for Dhaka, so it was generated from Dhaka's monthly rainfall climatology (see README, "Data &amp; limitations"). Import real records below to replace it.
+          </p>
+        )}
+
+        {!isNgo && <ReliefSection relief={relief} data={reliefByType} />}
+
+        <Card index={8} icon={Boxes} title="Stock & dispatch" subtitle={isNgo ? "Your NGO's stock, and dispatch runs in this period" : hasRole('admin') ? 'All stock, and dispatch runs in this period' : 'Your authority and its area, and dispatch runs in this period'}>
+          <div className="grid gap-5 lg:grid-cols-2">
+            <div>
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">In use right now</p>
+              {!(d?.resources || []).length ? <p className="text-sm text-slate-400">No stock registered.</p> : (
+                <ul className="space-y-2.5">
+                  {d.resources.map((r) => (
+                    <li key={r.resource_type}>
+                      <div className="flex justify-between gap-2 text-sm"><span className="text-slate-700">{RESOURCE_LABEL[r.resource_type] || humanize(r.resource_type)}</span><span className="tabular-nums text-slate-500">{fmtNum(r.total - r.available)} of {fmtNum(r.total)} out · {r.utilization_pct ?? 0}%</span></div>
+                      <div className="mt-1 h-2 rounded bg-slate-100"><div className="h-2 rounded bg-brand-600" style={{ width: `${Math.min(100, r.utilization_pct || 0)}%` }} /></div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            <div>
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Dispatch workflows</p>
+              {!workflowData.length ? <p className="text-sm text-slate-400">No dispatch runs in this period.</p> : (
+                <ul className="space-y-1.5 text-sm">
+                  {workflowData.sort((a, b) => b.value - a.value).map((w) => (
+                    <li key={w.key} className="flex justify-between"><span className="text-slate-600">{w.name}</span><strong className="tabular-nums">{w.value}</strong></li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        </Card>
 
         {hasRole('admin', 'city_officer') && (
           <Card index={7} icon={Database} title="Bulk historical import"
@@ -268,5 +325,85 @@ export default function AnalyticsPage() {
         )}
       </div>
     </>
+  )
+}
+
+// Risk score above a ward's bar. Where the incidents line crosses that spot, the number moves just above the line's dot.
+function WardScoreLabel({ x, y, width, height, value, index, wards, incidentMax }) {
+  if (value === null || value === undefined) return null
+  let labelY = y - 6
+  const base = y + height
+  if (value > 0 && height > 0) {
+    const plotHeight = (height * 100) / value
+    const lineY = base - (plotHeight * (wards[index]?.incidents || 0)) / incidentMax
+    if (labelY > lineY - 14 && labelY < lineY + 10) labelY = lineY - 10
+  }
+  return <text x={x + width / 2} y={labelY} textAnchor="middle" style={VALUE_LABEL}>{round(value)}</text>
+}
+
+function ReliefTip({ active, payload, label }) {
+  if (!active || !payload?.length) return null
+  const item = payload[0].payload
+  return (
+    <div className="rounded-xl border border-slate-200 bg-surface/95 px-3 py-2 text-xs shadow-lg backdrop-blur">
+      <p className="mb-1 font-semibold text-slate-800">{label}</p>
+      {payload.map((p) => (
+        <p key={p.dataKey} className="flex items-center gap-2 text-slate-600">
+          <span className="h-2 w-2 rounded-full" style={{ background: item.color, opacity: p.dataKey === 'requested' ? ASKED_OPACITY : 1 }} />
+          {p.name}: <strong className="text-slate-900">{fmtNum(p.value, 1)}</strong>
+        </p>
+      ))}
+    </div>
+  )
+}
+
+function ReliefSection({ relief, data, className = '' }) {
+  const pct = relief.units_requested ? Math.round((100 * relief.units_delivered) / relief.units_requested) : null
+  return (
+    <Card index={7} icon={HandHeart} className={className} title="Relief for people (NGO)"
+      subtitle="Community needs in this period: what was asked for, what reached people, how fast">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+        <StatCard label="Needs logged" value={relief.needs_logged ?? 0} hint={`${relief.duplicates_blocked ?? 0} duplicates blocked`} />
+        <StatCard label="Open now" value={relief.needs_open_now ?? 0} hint={`${relief.awaiting_confirmation ?? 0} waiting for confirmation`} tone="sky" />
+        <StatCard label="Households waiting" value={relief.households_waiting ?? 0} tone="amber" />
+        <StatCard label="Households served" value={relief.households_served ?? 0} hint={`${relief.needs_fulfilled ?? 0} needs fully met`} tone="green" />
+        <StatCard label="Units delivered" value={relief.units_delivered ?? 0} hint={pct != null ? `${pct}% of ${fmtNum(relief.units_requested)} asked for` : 'Nothing asked for yet'} tone="violet" />
+        <StatCard label="Time to first relief" value={relief.avg_hours_to_first_relief ?? '—'} decimals={1} suffix=" h" hint="Need logged to first stock reserved" tone="red" />
+      </div>
+      <div className="mt-4 h-64 w-full min-w-0">
+        {!data.length ? <Empty text="No relief needs in this period" /> : (
+          <ResponsiveContainer>
+            <BarChart data={data} margin={{ top: 20, right: 4, left: -18, bottom: 0 }}>
+              {GRID}
+              <XAxis dataKey="label" tick={AXIS} tickLine={false} axisLine={false} />
+              <YAxis allowDecimals={false} tick={AXIS} tickLine={false} axisLine={false} />
+              <Tooltip content={<ReliefTip />} cursor={{ fill: 'var(--color-slate-100)' }} />
+              <Bar dataKey="requested" name="Asked for" radius={[6, 6, 0, 0]} animationDuration={900}>
+                {data.map((x) => <Cell key={x.need_type} fill={x.color} fillOpacity={ASKED_OPACITY} stroke={x.color} strokeWidth={2} />)}
+                <LabelList dataKey="requested" position="top" style={VALUE_LABEL} />
+              </Bar>
+              <Bar dataKey="delivered" name="Delivered" radius={[6, 6, 0, 0]} animationDuration={900}>
+                {data.map((x) => <Cell key={x.need_type} fill={x.color} />)}
+                <LabelList dataKey="delivered" position="top" style={VALUE_LABEL} />
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        )}
+      </div>
+      {data.length > 0 && (
+        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-slate-500">
+          {data.map((x) => (
+            <span key={x.need_type} className="inline-flex items-center gap-1.5">
+              <span className="flex" aria-hidden>
+                <span className="h-3 w-3 rounded-l-sm border-2" style={{ borderColor: x.color, background: `${x.color}33` }} />
+                <span className="h-3 w-3 rounded-r-sm" style={{ background: x.color }} />
+              </span>
+              {x.label}
+            </span>
+          ))}
+          <span className="text-slate-400">Outlined bar = asked for · Solid bar = delivered</span>
+        </div>
+      )}
+    </Card>
   )
 }

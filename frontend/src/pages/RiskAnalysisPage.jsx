@@ -38,7 +38,7 @@ function Gauge({ score, level }) {
           <stop offset="70%" stopColor={RISK_COLOR.high} /><stop offset="100%" stopColor={RISK_COLOR.critical} />
         </linearGradient>
       </defs>
-      <path d="M20 95 A70 70 0 0 1 160 95" fill="none" stroke="#e2e8f0" strokeWidth="14" strokeLinecap="round" />
+      <path d="M20 95 A70 70 0 0 1 160 95" fill="none" stroke="var(--color-slate-200)" strokeWidth="14" strokeLinecap="round" />
       <motion.path d="M20 95 A70 70 0 0 1 160 95" fill="none" stroke="url(#gauge)" strokeWidth="14" strokeLinecap="round"
         strokeDasharray={c} initial={{ strokeDashoffset: c }} animate={{ strokeDashoffset: c * (1 - pct) }} transition={{ type: 'spring', stiffness: 80, damping: 18 }} />
       <text x="90" y="82" textAnchor="middle" className="fill-slate-900" style={{ fontSize: 30, fontWeight: 800 }}>{score.toFixed(1)}</text>
@@ -95,7 +95,7 @@ export default function RiskAnalysisPage() {
               <dl className="grid grid-cols-2 gap-3 content-start">
                 {[['MAE (hold-out)', model.metrics.mae, 2, 'Mean absolute error in score points'], ['R²', model.metrics.r2, 3, 'Variance explained'],
                   ['Train rows', model.metrics.n_train, 0], ['Test rows', model.metrics.n_test, 0]].map(([k, v, dec, hint]) => (
-                  <div key={k} className="rounded-xl border border-slate-100 bg-gradient-to-br from-slate-50 to-white p-3" title={hint}>
+                  <div key={k} className="rounded-xl border border-slate-100 bg-gradient-to-br from-slate-50 to-surface p-3" title={hint}>
                     <dt className="text-xs text-slate-500">{k}</dt>
                     <dd className="text-xl font-bold text-slate-900"><AnimatedNumber value={v} decimals={dec} /></dd>
                   </div>
@@ -112,10 +112,10 @@ export default function RiskAnalysisPage() {
                 <div className="h-72 w-full min-w-0">
                   <ResponsiveContainer>
                     <BarChart data={model.importance} layout="vertical" margin={{ left: 0, right: 24, top: 0, bottom: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
-                      <XAxis type="number" unit="%" tick={{ fontSize: 11, fill: '#64748b' }} tickLine={false} axisLine={false} />
-                      <YAxis type="category" dataKey="label" width={170} tick={{ fontSize: 11, fill: '#475569' }} tickLine={false} axisLine={false} />
-                      <Tooltip cursor={{ fill: '#f1f5f9' }} formatter={(v, _n, item) => [`${v}%`, `Importance · ${groupOf(item?.payload?.feature).label}`]} />
+                      <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="var(--color-slate-200)" />
+                      <XAxis type="number" unit="%" tick={{ fontSize: 11, fill: 'var(--color-slate-500)' }} tickLine={false} axisLine={false} />
+                      <YAxis type="category" dataKey="label" width={170} tick={{ fontSize: 11, fill: 'var(--color-slate-600)' }} tickLine={false} axisLine={false} />
+                      <Tooltip cursor={{ fill: 'var(--color-slate-100)' }} formatter={(v, _n, item) => [`${v}%`, `Importance · ${groupOf(item?.payload?.feature).label}`]} />
                       <Bar dataKey="gain_pct" radius={[0, 6, 6, 0]} barSize={14} animationDuration={900}>
                         {model.importance.map((x) => <Cell key={x.feature} fill={groupOf(x.feature).color} />)}
                       </Bar>
@@ -152,7 +152,7 @@ export default function RiskAnalysisPage() {
               </fieldset>
             </div>
 
-            <div className="rounded-2xl border border-slate-100 bg-gradient-to-b from-slate-50 to-white p-4">
+            <div className="rounded-2xl border border-slate-100 bg-gradient-to-b from-slate-50 to-surface p-4">
               {!sim ? <Skeleton className="h-72 w-full" /> : (
                 <>
                   <Gauge score={sim.score} level={sim.level} />

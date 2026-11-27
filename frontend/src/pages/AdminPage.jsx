@@ -63,8 +63,23 @@ function OwnerOnlyNote() {
 }
 
 const PAGE = 25
+const ISO_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+// Audit values come straight from the database: show them the way people read them.
+const auditValue = (v) => {
+  if (v === null || v === undefined || v === '') return 'none'
+  if (typeof v === 'boolean') return v ? 'yes' : 'no'
+  if (typeof v === 'number') return Number.isInteger(v) ? fmtNum(v) : String(Number(v.toFixed(5)))
+  if (typeof v === 'object') { const s = JSON.stringify(v); return s.length > 40 ? `${s.slice(0, 40)}…` : s }
+  const s = String(v)
+  if (ISO_TIME.test(s)) return fmtDateTime(s)
+  if (UUID.test(s)) return s.slice(0, 8)
+  return s.length > 40 ? `${s.slice(0, 40)}…` : s
+}
+
 function Audit() {
   const [rows, setRows] = useState(null)
+  const [names, setNames] = useState({})
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
   const [table, setTable] = useState('')
@@ -76,6 +91,11 @@ function Audit() {
     if (action) q = q.eq('action', action)
     const { data, count } = await q
     setRows(data || []); setTotal(count || 0)
+    const ids = [...new Set((data || []).map((r) => r.actor_id).filter(Boolean))]
+    if (ids.length) {
+      const { data: people } = await supabase.from('profiles').select('id,full_name').in('id', ids)
+      setNames((cur) => ({ ...cur, ...Object.fromEntries((people || []).map((p) => [p.id, p.full_name])) }))
+    }
   }, [page, table, action])
   useEffect(() => { load() }, [load])
   const diff = (r) => {
@@ -98,12 +118,18 @@ function Audit() {
                 return (
                   <tr key={r.id} className="cursor-pointer hover:bg-slate-50" onClick={() => setOpen(open === r.id ? null : r.id)}>
                     <td className="whitespace-nowrap px-3 py-2 text-xs text-slate-500">{fmtDateTime(r.created_at)}</td>
-                    <td className="px-3 py-2 text-xs"><span className="font-mono">{r.actor_id ? r.actor_id.slice(0, 8) : 'system'}</span> <span className="text-slate-500">{r.actor_role}</span></td>
+                    <td className="px-3 py-2 text-xs">
+                      {r.actor_id
+                        ? <span className="font-medium text-slate-800">{names[r.actor_id] || <span className="font-mono">{r.actor_id.slice(0, 8)}</span>}</span>
+                        : <span className="font-medium text-slate-800">System</span>}
+                      {r.actor_role && r.actor_role !== 'system' && <span className="block text-slate-500">{ROLE_LABEL[r.actor_role] || r.actor_role}</span>}
+                      {r.actor_id && r.actor_role === 'system' && <span className="block text-slate-500">automatic</span>}
+                    </td>
                     <td className="px-3 py-2"><span className={`rounded px-1.5 text-xs font-semibold ${r.action === 'DELETE' ? 'bg-rose-100 text-rose-700' : r.action === 'INSERT' ? 'bg-emerald-100 text-emerald-700' : 'bg-sky-100 text-sky-700'}`}>{r.action}</span></td>
                     <td className="px-3 py-2 text-xs">{r.table_name} <span className="font-mono text-slate-400">{r.record_id?.slice(0, 8)}</span></td>
                     <td className="max-w-md px-3 py-2 text-xs text-slate-600">
-                      {changed ? changed.map((k) => <span key={k} className="mr-1 inline-block rounded bg-slate-100 px-1">{k}: {String(r.old_data[k])} → {String(r.new_data[k])}</span>) : '—'}
-                      {open === r.id && <pre className="mt-2 max-h-60 overflow-auto rounded bg-slate-900 p-2 text-[11px] text-slate-100">{JSON.stringify({ old: r.old_data, new: r.new_data }, null, 2)}</pre>}
+                      {changed ? changed.map((k) => <span key={k} className="mb-0.5 mr-1 inline-block rounded bg-slate-100 px-1">{k.replace(/_/g, ' ')}: {auditValue(r.old_data[k])} → {auditValue(r.new_data[k])}</span>) : '—'}
+                      {open === r.id && <pre className="mt-2 max-h-60 overflow-auto rounded bg-ink-900 p-2 text-[11px] text-white/90">{JSON.stringify({ old: r.old_data, new: r.new_data }, null, 2)}</pre>}
                     </td>
                   </tr>
                 )
@@ -489,7 +515,7 @@ function CsvInput({ value, onChange, placeholder }) {
   return (
     <div className="space-y-2">
       <input type="file" accept=".csv,text/csv" onChange={onFile} aria-label="CSV file"
-        className="block text-sm text-slate-600 file:mr-3 file:rounded-full file:border-0 file:bg-brand-50 file:px-3 file:py-1.5 file:text-sm file:font-semibold file:text-brand-700" />
+        className="block text-sm text-slate-600 file:mr-3 file:rounded-full file:border-0 file:bg-brand-50 file:px-3 file:py-1.5 file:text-sm file:font-semibold file:text-brand-700 dark:file:text-teal-300" />
       <Textarea aria-label="CSV content" rows={5} className="font-mono text-xs" placeholder={placeholder} value={value} onChange={(e) => onChange(e.target.value)} />
     </div>
   )
@@ -648,6 +674,58 @@ function SystemTab() {
         <p className="mt-3 text-sm text-slate-600">Then open AI Risk Analysis → "Re-score all wards": scores still compute from stale cache / climatology, flagged as degraded. After 3 failures the circuit breaker opens and the upstream is skipped for 60 s.</p>
         <p className="mt-1 text-xs text-slate-500">Served so far: {Object.entries(h.weather.stats).map(([k, v]) => `${k} ${v}`).join(' · ')}</p>
       </Card>
+      <DeliveriesCard />
     </div>
+  )
+}
+
+const DELIVERY_TONE = { sent: 'text-emerald-700', skipped: 'text-slate-500', failed: 'text-rose-700', queued: 'text-amber-700', sending: 'text-sky-700' }
+
+function DeliveriesCard() {
+  const toast = useToast()
+  const [d, setD] = useState(null)
+  const [err, setErr] = useState('')
+  const [busy, setBusy] = useState(false)
+  const load = useCallback(() => api('/api/notifications/status').then((x) => { setD(x); setErr('') }).catch((e) => setErr(errorMessage(e))), [])
+  useEffect(() => { load() }, [load])
+  const sendNow = async () => {
+    setBusy(true)
+    try {
+      const r = await api('/api/notifications/process-now', { method: 'POST' })
+      toast.info(`Sent ${r.sent}, skipped ${r.skipped}, retrying ${r.retrying}, failed ${r.failed}`)
+      load()
+    } catch (e) { toast.error(errorMessage(e)) } finally { setBusy(false) }
+  }
+  return (
+    <Card title="E-mail & SMS notifications" subtitle="Copies of in-app notifications, sent by the worker with retry"
+      actions={<Button variant="secondary" size="sm" loading={busy} onClick={sendNow}>Send queued now</Button>}>
+      {err && <Alert tone="error">{err}</Alert>}
+      {!d && !err && <Spinner />}
+      {d && (
+        <div className="space-y-3 text-sm">
+          <p className="text-slate-600">E-mail provider: <strong>{d.config.email_provider}</strong> · SMS provider: <strong>{d.config.sms_provider}</strong>
+            {d.worker.last_error && <span className="ml-2 text-rose-700">Last error: {d.worker.last_error}</span>}</p>
+          <p className="text-xs text-slate-500">Last 7 days: {d.last_7_days.length ? d.last_7_days.map((r) => `${r.channel} ${r.status} ${r.n}`).join(' · ') : 'nothing yet'}</p>
+          {d.recent.length > 0 && (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[560px] text-left text-xs">
+                <thead><tr className="text-slate-500"><th className="py-1.5 pr-3 font-medium">When</th><th className="pr-3 font-medium">To</th><th className="pr-3 font-medium">Channel</th><th className="pr-3 font-medium">Message</th><th className="font-medium">Status</th></tr></thead>
+                <tbody className="divide-y divide-slate-100">
+                  {d.recent.map((r) => (
+                    <tr key={r.id}>
+                      <td className="whitespace-nowrap py-1.5 pr-3 text-slate-500">{fmtDateTime(r.created_at)}</td>
+                      <td className="pr-3">{r.recipient}</td>
+                      <td className="pr-3 uppercase">{r.channel}</td>
+                      <td className="max-w-[260px] truncate pr-3" title={r.title}>{r.title}</td>
+                      <td className={`whitespace-nowrap ${DELIVERY_TONE[r.status] || ''}`} title={r.last_error || ''}>{r.status}{r.attempts > 1 ? ` (${r.attempts} tries)` : ''}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+    </Card>
   )
 }

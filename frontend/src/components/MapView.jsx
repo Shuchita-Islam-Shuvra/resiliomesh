@@ -70,7 +70,7 @@ export default function MapView({
     : { center: DHAKA_CENTER, zoom: 12 }
   const focusId = focusWard?.ward_id || focusWard?.id
   return (
-    <div className={`${height} relative w-full overflow-hidden rounded-xl border border-slate-200`} role="region" aria-label={bounds ? `Map of ${areaLabel(area)}` : 'Map of Dhaka'}>
+    <div className={`${height} rm-basemap-${BASEMAPS[basemap] ? basemap : 'map'} relative w-full overflow-hidden rounded-xl border border-slate-200`} role="region" aria-label={bounds ? `Map of ${areaLabel(area)}` : 'Map of Dhaka'}>
       <MapContainer key={bounds ? area : 'dhaka'} {...frame} scrollWheelZoom zoomSnap={0.25} zoomDelta={0.5} wheelPxPerZoomLevel={90}
         className="h-full w-full">
         {(BASEMAPS[basemap] || BASEMAPS.map).map((t) => (
@@ -131,7 +131,7 @@ export default function MapView({
         {focusWard !== undefined && <FocusController focus={focusWard} home={home} />}
       </MapContainer>
       {otherCells.length > 0 && (
-        <p className="pointer-events-none absolute bottom-1 left-1 z-[1000] rounded bg-slate-900/80 px-2 py-0.5 text-[11px] font-medium text-white">
+        <p className="pointer-events-none absolute bottom-1 left-1 z-[1000] rounded bg-ink-900/80 px-2 py-0.5 text-[11px] font-medium text-white">
           Shaded: {areaLabel(otherArea)}, outside your area ({areaLabel(area)})
         </p>
       )}

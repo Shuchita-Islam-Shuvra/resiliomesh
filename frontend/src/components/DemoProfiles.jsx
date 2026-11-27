@@ -108,7 +108,7 @@ export default function DemoProfiles({ role, busy, setBusy, codeRequired: server
             <li key={p.key}>
               <button type="button" onClick={() => pick(p)} disabled={busy && !loading} aria-busy={loading}
                 aria-label={`Sign in as ${p.name}, ${R.label}, ${p.place}`} title={p.does}
-                className={`group flex h-full w-full items-center gap-3 rounded-xl bg-white p-3 text-left ring-1 ring-inset transition hover:ring-brand-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 disabled:cursor-not-allowed disabled:opacity-60 ${
+                className={`group flex h-full w-full items-center gap-3 rounded-xl bg-surface p-3 text-left ring-1 ring-inset transition hover:ring-brand-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 disabled:cursor-not-allowed disabled:opacity-60 ${
                   'ring-slate-200'}`}>
                 <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand-50 text-xs font-bold text-brand-700 ring-1 ring-inset ring-brand-100" aria-hidden>
                   {initials(p.name)}

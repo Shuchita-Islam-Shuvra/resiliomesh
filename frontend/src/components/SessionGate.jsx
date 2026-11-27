@@ -50,7 +50,7 @@ export default function SessionGate() {
               <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
                 <span className="flex items-center gap-1.5">
                   <Sparkles className="h-4 w-4" aria-hidden />Demo account. {idLabel && demo.staffId
-                    ? <>{idLabel}: <code className="rounded bg-white px-1.5 py-0.5 font-mono font-semibold">{demo.staffId}</code></>
+                    ? <>{idLabel}: <code className="rounded bg-surface px-1.5 py-0.5 font-mono font-semibold">{demo.staffId}</code></>
                     : <>NGO is pre-selected.</>}
                 </span>
                 {idLabel && demo.staffId && staffId !== demo.staffId && (

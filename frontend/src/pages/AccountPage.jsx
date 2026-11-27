@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
-import { BadgeCheck, Clock, FileUp, KeyRound, Phone, ShieldCheck, Trash2, UserCheck } from 'lucide-react'
+import { BadgeCheck, Clock, FileUp, KeyRound, Palette, Phone, ShieldCheck, Trash2, UserCheck } from 'lucide-react'
+import { ThemeSegmented } from '../components/ThemeToggle'
 import { Alert, Button, Card, Field, PageHeader, Select, Spinner } from '../components/ui'
 import { PhoneVerify, TotpEnroll } from '../components/VerifyPanels'
 import { useAuth } from '../context/AuthContext'
@@ -35,6 +36,9 @@ export default function AccountPage() {
         </Card>
         <MfaCard />
         <AccessRequestCard />
+        <Card title="Appearance" icon={Palette} subtitle="Saved on this device. System follows your phone or computer setting.">
+          <ThemeSegmented />
+        </Card>
       </div>
     </>
   )
@@ -187,7 +191,7 @@ function AccessRequestCard() {
             </Field>
             <Field label="File (JPG, PNG, WebP or PDF, max 5 MB)" error={err}>
               {(a) => <input {...a} type="file" accept={TYPES.join(',')} onChange={(e) => setFile(e.target.files?.[0] || null)}
-                className="block w-full text-sm text-slate-600 file:mr-3 file:rounded-full file:border-0 file:bg-brand-50 file:px-3 file:py-1.5 file:text-sm file:font-semibold file:text-brand-700 hover:file:bg-brand-100" />}
+                className="block w-full text-sm text-slate-600 file:mr-3 file:rounded-full file:border-0 file:bg-brand-50 file:px-3 file:py-1.5 file:text-sm file:font-semibold file:text-brand-700 dark:file:text-teal-300 hover:file:bg-brand-100" />}
             </Field>
             <Button type="submit" loading={busy} className="!rounded-full"><FileUp className="h-4 w-4" aria-hidden />Upload</Button>
           </form>

@@ -95,7 +95,7 @@ function Inventory() {
     <>
       <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
         {Object.entries(totals).map(([t, v]) => (
-          <div key={t} className="rounded-xl border border-slate-200 bg-white p-3">
+          <div key={t} className="rounded-xl border border-slate-200 bg-surface p-3">
             <p className="text-xs text-slate-500">{RESOURCE_LABEL[t]}</p>
             <p className="text-lg font-bold">{v.avail}<span className="text-sm font-normal text-slate-400">/{v.total}</span></p>
           </div>

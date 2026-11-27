@@ -38,10 +38,47 @@ Admins can simulate `timeout`, `error500` and `malformed` from **Admin → Syste
 | POST | `/api/workflows/process-now` | coordinators | drain queue synchronously |
 | POST | `/api/analytics/import` | admin, officer | CSV bulk import |
 | GET | `/api/admin/health` | admin | DB latency, queue, model, breaker |
+| GET | `/api/notifications/status` | admin | e-mail/SMS provider in use, delivery counts, last 25 deliveries |
+| POST | `/api/notifications/process-now` | admin | send queued e-mails/SMS now |
 
 All calls need `Authorization: Bearer <supabase access token>`. Every user is rate-limited to 120 requests/min (sliding window, HTTP 429 with `Retry-After`).
 
-Supabase RPCs that the browser calls directly (all check roles and versions server-side): `transition_incident`, `approve_plan`, `reject_plan`, `retry_workflow_run`, `update_task_status`, `allocate_to_need`, `nearby_incidents`, `ward_risk_summary`, `analytics_dashboard`.
+Supabase RPCs that the browser calls directly (all check roles and versions server-side): `transition_incident`, `approve_plan`, `reject_plan`, `retry_workflow_run`, `update_task_status`, `allocate_to_need`, `nearby_incidents`, `ward_risk_summary`, `analytics_dashboard`, `resolve_incident` (admin), `send_incident_alert` (admin, officer), `mark_notifications_read`.
+
+## Notifications (in-app, e-mail, SMS)
+
+Every notification shows in the app (bell icon, live). E-mail and SMS copies are queued in the database in the same transaction as the event, and the backend worker sends them afterwards (retry with backoff, 5 attempts). If the mail or SMS service is down, reports and dispatch still work.
+
+| Event | Who is told | Channels |
+|---|---|---|
+| New report | officers of that area (admins if the area has none) | app; critical (severity ≥ 4 or ≥ 45 cm): + e-mail; critical from an admin/staff: + SMS |
+| "Alert team" on a report (admin, or officer of the area) | chosen: officers / NGO coordinators of the area / field crew | app + e-mail; "urgent": + SMS |
+| Relief need logged | NGO coordinators of that area | app + e-mail; 100+ households: + SMS |
+| NGO backup asked | NGO coordinators of the other area | app + e-mail |
+| Field task assigned | that field worker | app + e-mail + SMS |
+| Field task cancelled | its crew | app (+ SMS if they had already been given it) |
+| Report resolved (any way) | reporter (+ e-mail), officers of the area, crew, NGO coordinators on it | app |
+
+Providers are set on the API server. With the default `log`, nothing is sent: deliveries are marked `skipped` (visible in Audit & Admin → System health).
+```
+APP_PUBLIC_URL=https://<your-app>.vercel.app   # links in e-mails / SMS
+NOTIFY_EMAIL_PROVIDER=resend                   # log | resend | smtp
+NOTIFY_EMAIL_FROM=ResilioMesh <alerts@your-domain>
+RESEND_API_KEY=re_...
+# or SMTP (Gmail app password, Brevo, ...):
+SMTP_HOST=smtp-relay.brevo.com
+SMTP_PORT=587
+SMTP_USER=...
+SMTP_PASSWORD=...
+NOTIFY_SMS_PROVIDER=bulksmsbd                  # log | bulksmsbd | twilio
+BULKSMSBD_API_KEY=...
+BULKSMSBD_SENDER_ID=...
+# or Twilio:
+TWILIO_ACCOUNT_SID=...
+TWILIO_AUTH_TOKEN=...
+TWILIO_FROM=+1...
+```
+SMS goes to the mobile number on the person's profile (Bangladeshi numbers only); people without one get app + e-mail only.
 
 ## Environment variables
 

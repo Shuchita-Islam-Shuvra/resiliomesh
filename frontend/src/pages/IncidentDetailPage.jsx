@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { ArrowLeft, BrainCircuit, CheckCircle2, Copy, Eye, RefreshCw, ShieldAlert, ShieldX, Users } from 'lucide-react'
+import { ArrowLeft, BrainCircuit, CheckCircle2, CircleCheckBig, Copy, Eye, Megaphone, RefreshCw, ShieldAlert, ShieldX, Users } from 'lucide-react'
 import ConflictDialog from '../components/ConflictDialog'
 import MapView from '../components/MapView'
 import TaskCrewCard, { TASK_CREW_SELECT } from '../components/TaskCrewCard'
@@ -31,11 +31,17 @@ export default function IncidentDetailPage() {
   const [note, setNote] = useState('')
   const [dupOf, setDupOf] = useState('')
   const [nearby, setNearby] = useState([])
+  const [alertTo, setAlertTo] = useState([])
+  const [alertMsg, setAlertMsg] = useState('')
+  const [urgent, setUrgent] = useState(false)
   const peers = usePresence(`incident:${id}`, profile)
   const wardArea = inc?.wards?.city_corporation
   const officer = hasRole('city_officer', 'admin') && canManageArea(wardArea)
+  const isAdmin = hasRole('admin')
   const outsideArea = hasRole('city_officer') && inc && !officer
   const ownReport = !!inc && !!profile && inc.reporter_id === profile.id
+  const isOpen = !!inc && !['resolved', 'rejected', 'duplicate'].includes(inc.status)
+  const openTasks = tasks.filter((t) => ['pending', 'assigned', 'accepted', 'in_progress'].includes(t.status))
 
   const load = useCallback(async () => {
     const { data, error } = await supabase.from('incidents')
@@ -70,6 +76,41 @@ export default function IncidentDetailPage() {
       toast.success(`Incident ${humanize(to).toLowerCase()}`)
       setModal(null); setNote(''); setChangedBanner(false)
       await load()
+    } catch (e) { toast.error(errorMessage(e)) } finally { setBusy('') }
+  }
+
+  const resolveNow = async () => {
+    setBusy('resolve')
+    try {
+      const { data, error } = await supabase.rpc('resolve_incident', { p_incident_id: id, p_expected_version: inc.version, p_note: note.trim() })
+      if (error) throw error
+      if (data.conflict) { setConflict({ mine: { ...inc, status: 'resolved' }, theirs: data.current }); return }
+      const extra = [
+        data.tasks_cancelled ? `${data.tasks_cancelled} open task(s) cancelled` : '',
+        data.equipment_returned ? `${data.equipment_returned} equipment reservation(s) returned to stock` : '',
+        data.plans_closed ? `${data.plans_closed} pending plan(s) closed` : '',
+      ].filter(Boolean).join(', ')
+      toast.success(`Resolved for everyone${extra ? `: ${extra}` : ''}. The team has been notified.`, 'Report resolved')
+      setModal(null); setNote(''); setChangedBanner(false)
+      await load()
+    } catch (e) { toast.error(errorMessage(e)) } finally { setBusy('') }
+  }
+
+  const openAlert = () => {
+    setAlertTo(isAdmin ? ['officers'] : ['ngo', 'field'])
+    setAlertMsg(''); setUrgent(false); setModal('alert')
+  }
+
+  const sendAlert = async () => {
+    setBusy('alert')
+    try {
+      const { data, error } = await supabase.rpc('send_incident_alert', {
+        p_incident_id: id, p_audience: alertTo, p_message: alertMsg.trim(), p_urgent: urgent,
+      })
+      if (error) throw error
+      if (data.sent) toast.success(`Alert sent to ${data.sent} ${data.sent === 1 ? 'person' : 'people'}${urgent ? ' (app, e-mail and SMS)' : ' (app and e-mail)'}.`)
+      else toast.warning('Nobody matched: there is no active staff for that group in this area yet.')
+      setModal(null)
     } catch (e) { toast.error(errorMessage(e)) } finally { setBusy('') }
   }
 
@@ -130,7 +171,9 @@ export default function IncidentDetailPage() {
             {inc.status === 'reported' && !ownReport && <Button loading={busy === 'verified'} onClick={() => transition('verified')}><CheckCircle2 className="h-4 w-4" />Verify</Button>}
             {['verified', 'assessed'].includes(inc.status) && <Button loading={busy === 'assess'} onClick={assess}><BrainCircuit className="h-4 w-4" />{inc.status === 'assessed' ? 'Re-run AI assessment' : 'Run AI risk assessment'}</Button>}
             {inc.status === 'assessed' && <Link to={`/resources?tab=plans&incident=${inc.id}`}><Button variant="secondary">Plan resources</Button></Link>}
-            {inc.status === 'in_progress' && <Button variant="secondary" loading={busy === 'resolved'} onClick={() => transition('resolved')}>Mark resolved</Button>}
+            {inc.status === 'in_progress' && !isAdmin && <Button variant="secondary" loading={busy === 'resolved'} onClick={() => transition('resolved')}>Mark resolved</Button>}
+            {isAdmin && isOpen && <Button variant="secondary" onClick={() => { setNote(''); setModal('resolve') }}><CircleCheckBig className="h-4 w-4" />Resolve now</Button>}
+            {isOpen && <Button variant="secondary" onClick={openAlert}><Megaphone className="h-4 w-4" />Alert team</Button>}
             {inc.status === 'duplicate' && !ownReport && <Button variant="secondary" loading={busy === 'verified'} onClick={() => transition('verified')}>Not a duplicate — verify</Button>}
             {['reported', 'verified'].includes(inc.status) && <Button variant="secondary" onClick={openDuplicate}><Copy className="h-4 w-4" />Mark duplicate</Button>}
             {['reported', 'verified', 'assessed'].includes(inc.status) && <Button variant="danger" onClick={() => setModal('reject')}>Reject</Button>}
@@ -167,7 +210,7 @@ export default function IncidentDetailPage() {
           <ol className="relative space-y-4 border-l border-slate-200 pl-4">
             {history.map((h) => (
               <li key={h.id}>
-                <span className="absolute -left-1.5 mt-1 h-3 w-3 rounded-full border-2 border-white bg-brand-600" aria-hidden />
+                <span className="absolute -left-1.5 mt-1 h-3 w-3 rounded-full border-2 border-surface bg-brand-600" aria-hidden />
                 <p className="text-sm font-medium text-slate-800">{h.from_status ? `${humanize(h.from_status)} → ` : ''}{humanize(h.to_status)}</p>
                 <p className="text-xs text-slate-500">{fmtDateTime(h.created_at)}{h.profiles ? ` · ${h.profiles.full_name}` : ' · system'}</p>
                 {h.note && <p className="mt-0.5 text-xs text-slate-600">{h.note}</p>}
@@ -190,6 +233,46 @@ export default function IncidentDetailPage() {
             {(a) => <Select {...a} value={dupOf} onChange={(e) => setDupOf(e.target.value)}><option value="">Select…</option>{nearby.map((n) => <option key={n.id} value={n.id}>{n.reference_code} · {Math.round(n.distance_m)} m · {humanize(n.status)}</option>)}</Select>}
           </Field>
         )}
+      </Modal>
+      <Modal open={modal === 'resolve'} onClose={() => setModal(null)} title="Resolve this report now"
+        footer={<><Button variant="secondary" onClick={() => setModal(null)}>Cancel</Button><Button loading={busy === 'resolve'} disabled={note.trim().length < 5} onClick={resolveNow}>Resolve for everyone</Button></>}>
+        <div className="space-y-3 text-sm text-slate-700">
+          <p>The report becomes <strong>resolved</strong> for every officer, NGO coordinator and field worker straight away, whatever stage it is at now ({humanize(inc.status).toLowerCase()}).</p>
+          <ul className="list-disc space-y-1 pl-5 text-slate-600">
+            <li>{openTasks.length ? `${openTasks.length} open field task(s) will be cancelled and the crew told by app and SMS.` : 'No field task is open.'}</li>
+            <li>Pumps, crews, boats and water tanks reserved for it go back to stock. Relief already handed out stays used.</li>
+            <li>Plans still waiting for approval are closed. The reporter and the area's officers are notified.</li>
+          </ul>
+          <Field label="Why is it resolved? (goes on the timeline and in the notifications)" required error={note && note.trim().length < 5 ? 'At least 5 characters' : ''}>
+            {(a) => <Textarea {...a} rows={3} value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. Checked by phone with the ward councillor: water drained overnight." />}
+          </Field>
+        </div>
+      </Modal>
+      <Modal open={modal === 'alert'} onClose={() => setModal(null)} title="Alert the team about this report"
+        footer={<><Button variant="secondary" onClick={() => setModal(null)}>Cancel</Button><Button loading={busy === 'alert'} disabled={!alertTo.length || alertMsg.trim().length < 5} onClick={sendAlert}><Megaphone className="h-4 w-4" />Send alert</Button></>}>
+        <div className="space-y-4 text-sm">
+          <fieldset>
+            <legend className="mb-2 font-medium text-slate-800">Who should act?</legend>
+            {[
+              isAdmin && { v: 'officers', label: 'Water Resilience Officers', hint: `Officers of ${areaLabel(wardArea) || 'this area'}: verify, assess, send pumps & crews` },
+              { v: 'ngo', label: 'NGO Coordinators', hint: `Coordinators based in ${areaLabel(wardArea) || 'this area'}: relief for the people affected` },
+              { v: 'field', label: 'Field crew', hint: openTasks.length ? 'The crew already on this report\'s tasks' : 'On-duty field workers of this area (no crew is assigned yet)' },
+            ].filter(Boolean).map((o) => (
+              <label key={o.v} className="mb-2 flex cursor-pointer items-start gap-2.5 rounded-lg border border-slate-200 p-2.5 hover:bg-slate-50">
+                <input type="checkbox" className="mt-0.5 h-4 w-4 accent-brand-600" checked={alertTo.includes(o.v)}
+                  onChange={(e) => setAlertTo((xs) => (e.target.checked ? [...xs, o.v] : xs.filter((x) => x !== o.v)))} />
+                <span><span className="block font-medium text-slate-800">{o.label}</span><span className="block text-xs text-slate-500">{o.hint}</span></span>
+              </label>
+            ))}
+          </fieldset>
+          <Field label="Message" required hint={`${alertMsg.trim().length}/500`} error={alertMsg && alertMsg.trim().length < 5 ? 'At least 5 characters' : ''}>
+            {(a) => <Textarea {...a} rows={3} maxLength={500} value={alertMsg} onChange={(e) => setAlertMsg(e.target.value)} placeholder="e.g. Water is rising near the school, send a pump and relief kits today." />}
+          </Field>
+          <label className="flex cursor-pointer items-start gap-2.5">
+            <input type="checkbox" className="mt-0.5 h-4 w-4 accent-red-600" checked={urgent} onChange={(e) => setUrgent(e.target.checked)} />
+            <span><span className="block font-medium text-slate-800">Urgent: also send an SMS</span><span className="block text-xs text-slate-500">Everyone always gets it in the app and by e-mail. SMS reaches people who do not check e-mail.</span></span>
+          </label>
+        </div>
       </Modal>
       <ConflictDialog conflict={conflict} fields={['status', 'risk_level', 'version']} onClose={() => setConflict(null)}
         onReload={() => { setConflict(null); load() }} />

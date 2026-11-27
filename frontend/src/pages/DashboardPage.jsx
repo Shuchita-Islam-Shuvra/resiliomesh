@@ -57,11 +57,11 @@ function StaffDashboard() {
   return (
     <>
       <Hero icon={ShieldCheck} eyebrow={area ? `Drainage command center · ${areaLabel(area)}` : 'Drainage command center'} title={area ? `${areaLabel(area)} operations overview` : 'Operations overview'} subtitle={<Greeting />}
-        actions={<Link to="/incidents/new"><Button className="!bg-white !from-white !to-white !text-brand-800 hover:!bg-brand-50"><Plus className="h-4 w-4" />New report</Button></Link>}
+        actions={<Link to="/incidents/new"><Button className="!bg-white !from-white !to-white !text-brand-800 hover:!bg-white/90"><Plus className="h-4 w-4" />New report</Button></Link>}
         stats={[['Awaiting verification', queues.reported.length], ['Awaiting AI assessment', queues.verified.length], ['Plans to approve', queues.plans.length], ['Field tasks need attention', attention.length]]} />
       {err && <Alert tone="error" className="mb-4">{err}</Alert>}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatCard index={0} label="Active incidents" value={t.active ?? 0} hint="last 7 days" icon={Droplets} />
+        <StatCard index={0} label="Open reports" value={t.open_now ?? 0} hint="All open, however old" icon={Droplets} />
         <StatCard index={1} label="Critical" value={t.critical ?? 0} hint="AI-assessed critical" icon={AlertTriangle} tone="red" />
         <StatCard index={2} label="People affected" value={t.people_affected ?? 0} hint="excl. duplicates" icon={Users} tone="amber" />
         <StatCard index={3} label="Avg. resolution" value={t.avg_resolution_hours ?? '—'} decimals={1} suffix=" h" hint={`P90 ${t.p90_resolution_hours ?? '—'} h`} icon={Clock} tone="green" />
@@ -73,15 +73,15 @@ function StaffDashboard() {
         <Card title="Highest-risk wards" subtitle="Live AI ward risk (weather + drainage + history)" className="xl:col-span-2" bodyClass="p-0">
           <div className="overflow-x-auto">
             <table className="min-w-full text-sm">
-              <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500"><tr><th className="px-4 py-2">Ward</th><th className="px-4 py-2">Risk</th><th className="px-4 py-2">Active</th><th className="px-4 py-2">Critical</th><th className="px-4 py-2">Updated</th></tr></thead>
+              <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500"><tr><th className="px-3 py-2 sm:px-4">Ward</th><th className="px-3 py-2 sm:px-4">Risk</th><th className="px-3 py-2 sm:px-4">Active</th><th className="px-3 py-2 sm:px-4">Critical</th><th className="hidden px-4 py-2 sm:table-cell">Updated</th></tr></thead>
               <tbody>
                 {wards.slice(0, 8).map((w) => (
                   <tr key={w.ward_id} className="border-t border-slate-100">
-                    <td className="px-4 py-2"><span className="font-medium text-slate-800">{w.name}</span> <span className="text-xs text-slate-400">{w.ward_id}</span></td>
-                    <td className="px-4 py-2"><RiskBadge level={w.risk_level} score={w.risk_score} /></td>
-                    <td className="px-4 py-2">{w.active_incidents}</td>
-                    <td className="px-4 py-2">{w.critical_incidents > 0 ? <span className="font-semibold text-rose-600">{w.critical_incidents}</span> : 0}</td>
-                    <td className="px-4 py-2 text-xs text-slate-500">{timeAgo(w.risk_updated_at)}</td>
+                    <td className="px-3 py-2 sm:px-4"><span className="font-medium text-slate-800">{w.name}</span> <span className="hidden text-xs text-slate-400 sm:inline">{w.ward_id}</span></td>
+                    <td className="px-3 py-2 sm:px-4"><RiskBadge level={w.risk_level} score={w.risk_score} /></td>
+                    <td className="px-3 py-2 sm:px-4">{w.active_incidents}</td>
+                    <td className="px-3 py-2 sm:px-4">{w.critical_incidents > 0 ? <span className="font-semibold text-rose-600">{w.critical_incidents}</span> : 0}</td>
+                    <td className="hidden px-4 py-2 text-xs text-slate-500 sm:table-cell">{timeAgo(w.risk_updated_at)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -124,8 +124,9 @@ function StaffDashboard() {
 
 const ATTN_TONE = { red: 'bg-red-50 text-red-700 ring-red-200', amber: 'bg-amber-50 text-amber-800 ring-amber-200', slate: 'bg-slate-100 text-slate-600 ring-slate-200' }
 function CrewAttention({ items, openTasks }) {
+  const { area } = useAuth()
   return (
-    <Card className="mt-5" title="Field crews need attention" subtitle={`${openTasks} open field task${openTasks === 1 ? '' : 's'} in your area · updates live`}
+    <Card className="mt-5" title="Field crews need attention" subtitle={`${openTasks} open field task${openTasks === 1 ? '' : 's'} ${area ? 'in your area' : 'across Dhaka'} · updates live`}
       actions={<Link className="text-xs font-medium text-brand-700 hover:underline" to="/workflows">All tasks</Link>} bodyClass="p-0">
       {items.length === 0 ? (
         <p className="flex items-center gap-2 px-5 py-4 text-sm text-slate-500"><CheckCircle2 className="h-4 w-4 text-emerald-600" aria-hidden />Every open field task has a full crew and is on time.</p>
@@ -136,7 +137,7 @@ function CrewAttention({ items, openTasks }) {
             return (
               <li key={task.id}>
                 <Link to={`/incidents/${task.incident_id}`} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3 hover:bg-slate-50">
-                  <div className="min-w-0 flex-1">
+                  <div className="min-w-0 basis-full sm:basis-auto sm:flex-1">
                     <p className="truncate text-sm font-medium text-slate-800">{task.title}</p>
                     <p className="truncate text-xs text-slate-500">{task.incidents?.reference_code} · {task.incidents?.wards?.name} · crew {have} of {need}{task.due_at ? ` · due ${fmtDateTime(task.due_at)}` : ''}</p>
                   </div>
@@ -260,8 +261,8 @@ function FieldDashboard() {
   return (
     <>
       <Hero icon={HardHat} eyebrow={profile.field_team || 'Field crew'} title="Field operations" subtitle={<Greeting />}
-        tone={onDuty ? 'from-ink-900 via-brand-900 to-brand-700' : 'from-ink-900 via-slate-800 to-slate-600'}
-        actions={<Link to="/field"><Button className="!bg-white !from-white !to-white !text-brand-800 hover:!bg-brand-50"><Smartphone className="h-4 w-4" />Open field portal</Button></Link>}
+        tone={onDuty ? 'from-ink-900 via-brand-900 to-brand-700' : 'from-ink-900 via-ink-700 to-ink-600'}
+        actions={<Link to="/field"><Button className="!bg-white !from-white !to-white !text-brand-800 hover:!bg-white/90"><Smartphone className="h-4 w-4" />Open field portal</Button></Link>}
         stats={[[onDuty ? 'On duty' : 'Off duty: no new tasks', '●'], ['open tasks', open.length], ['overdue', overdue]]} />
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatCard index={0} label="New assignments" value={c(['assigned'])} icon={ClipboardList} tone="sky" />
@@ -315,7 +316,7 @@ function Hero({ icon: Icon, eyebrow, title, subtitle, actions, stats = [], tone 
         animate={{ x: [0, 30, 0] }} transition={{ duration: 12, repeat: Infinity, ease: 'easeInOut' }} />
       <div className="relative flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
-          <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-brand-200">{Icon && <Icon className="h-4 w-4" aria-hidden />}{eyebrow}</p>
+          <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-teal-200">{Icon && <Icon className="h-4 w-4" aria-hidden />}{eyebrow}</p>
           <h1 className="mt-1 text-2xl font-bold tracking-tight sm:text-3xl">{title}</h1>
           <p className="mt-1 text-sm text-white/70">{subtitle}</p>
         </div>
@@ -361,7 +362,7 @@ function NgoDashboard() {
     <>
       <Hero icon={HandHeart} eyebrow="Humanitarian coordination" title="Relief operations" subtitle={<Greeting />}
         tone="from-ink-900 via-rose-950 to-rose-800"
-        actions={<Link to="/ngo"><Button className="!bg-white !from-white !to-white !text-rose-800 hover:!bg-rose-50">Open coordination center<ArrowRight className="h-4 w-4" /></Button></Link>}
+        actions={<Link to="/ngo"><Button className="!bg-white !from-white !to-white !text-rose-800 hover:!bg-white/90">Open coordination center<ArrowRight className="h-4 w-4" /></Button></Link>}
         stats={[['open needs', open.length], ['households waiting', households.toLocaleString()], ['duplicate requests blocked', dups]]} />
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatCard index={0} label="Open needs" value={open.length} icon={HandHeart} tone="red" />

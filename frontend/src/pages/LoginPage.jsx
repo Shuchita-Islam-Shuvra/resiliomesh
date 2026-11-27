@@ -34,7 +34,7 @@ export default function LoginPage() {
   const nav = useNavigate()
   const loc = useLocation()
   const [params, setParams] = useSearchParams()
-  const role = roleOrDefault(params.get('role'), 'admin')
+  const role = roleOrDefault(params.get('role'))
   const R = ROLE_BY_KEY[role]
   const idLabel = SIGNIN_ID_LABEL[role]
 

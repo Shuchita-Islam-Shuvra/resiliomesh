@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom'
-import { Clock, LogIn, ShieldCheck, UserPlus } from 'lucide-react'
+import { ArrowRight, Clock, LogIn, ShieldCheck, UserPlus } from 'lucide-react'
 import { Alert, Button, Field, Input, Select } from '../components/ui'
 import { PasswordInput, StrengthMeter } from '../components/PasswordInput'
 import PortalLayout from '../components/PortalLayout'
@@ -14,6 +14,13 @@ const EMPTY = {
   organization_id: '', organization_name: '', registration_no: '', employee_id: '', designation: '', team: '',
   accept_terms: false,
 }
+
+const JudgesDemoNote = ({ role, label }) => (
+  <Link to={`/login?role=${role}`}
+    className="mb-4 flex w-full items-center justify-center gap-1.5 rounded-lg bg-brand-50 px-3 py-2 text-center text-sm font-semibold text-brand-800 ring-1 ring-inset ring-brand-200 hover:bg-brand-100">
+    Judges: no sign-up needed. Use a one-click {label} demo account<ArrowRight className="h-4 w-4 shrink-0" aria-hidden />
+  </Link>
+)
 
 const SignUpLayout = ({ role, ...p }) => (
   <PortalLayout role={role} eyebrow="Create your account" heading="Who are you signing up as?"
@@ -110,6 +117,7 @@ export default function RegisterPage() {
   if (role === 'admin') {
     return (
       <SignUpLayout role={role} onRoleChange={setRole} title="Admin accounts" subtitle={R.signInSubtitle}>
+        <JudgesDemoNote role={role} label={R.label} />
         <Alert tone="info" title="Admin accounts cannot be self-registered">
           For security, administrator access is granted only by an existing administrator from <b>Audit &amp; Admin → Users &amp; roles</b>.
           If you are part of the platform team, ask an admin to create or promote your account.
@@ -151,8 +159,8 @@ export default function RegisterPage() {
       {(a) => <Select {...a} value={v.ward_id} onChange={set('ward_id')}><option value="">Select area</option>{wards.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</Select>}
     </Field>
   )
-  const orgSelect = (label, allowOther) => (
-    <Field label={label} error={errors.organization_id} required>
+  const orgSelect = (label, allowOther, hint) => (
+    <Field label={label} error={errors.organization_id} required hint={hint}>
       {(a) => (
         <Select {...a} value={v.organization_id} onChange={set('organization_id')}>
           <option value="">Select organisation</option>
@@ -169,6 +177,7 @@ export default function RegisterPage() {
     <SignUpLayout role={role} onRoleChange={setRole}
       title={staff ? `Request ${R.label} access` : 'Create citizen account'}
       subtitle={R.tagline}>
+      <JudgesDemoNote role={role} label={R.label} />
       <form onSubmit={submit} noValidate className="space-y-5" aria-label={`${R.label} registration`}>
         {msg && <Alert tone={msg.tone}>{msg.text}</Alert>}
 
@@ -197,8 +206,7 @@ export default function RegisterPage() {
         {role === 'ngo_coordinator' && (
           <fieldset className={box}>
             <legend className={legend}>Organisation details</legend>
-            <div className="sm:col-span-2">{orgSelect('NGO', true)}
-            <p className="-mt-2 text-xs text-slate-500 sm:col-span-2">You'll choose this NGO when you sign in.</p></div>
+            <div className="sm:col-span-2">{orgSelect('NGO', true, "You'll choose this NGO when you sign in.")}</div>
             {v.organization_id === 'other' && (
               <>
                 <Field label="NGO name" error={errors.organization_name} required>{(a) => <Input {...a} value={v.organization_name} onChange={set('organization_name')} maxLength={120} />}</Field>

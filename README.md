@@ -14,8 +14,25 @@
 | Also implemented (not declared) | A01, A03, A04, A06, A07, A08 |
 | SDGs | 6, 11, 13, 17 |
 | Live app | **[resiliomesh.vercel.app](https://resiliomesh.vercel.app)** |
-| API | `https://<your-api>.onrender.com/docs` |
-| Video | `https://youtu.be/<id>` |
+| API | **[resiliomesh.onrender.com/docs](https://resiliomesh.onrender.com/docs)** |
+
+## For judges: try it in one click
+
+No sign-up needed. Ready-made demo accounts exist for every role.
+
+1. Open **[resiliomesh.vercel.app/login](https://resiliomesh.vercel.app/login)**.
+2. Pick a role tab at the top.
+3. Scroll to **Demo accounts for judges** and click a profile. You are signed in with no password.
+
+| Role | What to look at |
+|---|---|
+| **Citizen** | Report a flooded street, follow its status |
+| **Water Resilience Officer** (Dhaka South / North) | Verify reports, live risk map, approve the pump & crew plan |
+| **NGO Coordinator** | Relief stock, community needs, duplicate-aid detection |
+| **Field Worker** | Assigned tasks; works offline and syncs on reconnect |
+| **Admin** (system owner / access reviewer) | Users & roles, two-admin approval, audit log |
+
+> The API runs on Render's free tier, so the first request after a quiet period can take about 50 seconds while it wakes up.
 
 ## 1. Problem
 
@@ -75,7 +92,7 @@ See **[docs/REQUIREMENTS_MATRIX.md](docs/REQUIREMENTS_MATRIX.md)** for a line-by
 ## 5. Running locally
 
 ```bash
-# 1. Database: follow docs/SUPABASE_SETUP.md (run 5 migrations + seed.sql, create demo users)
+# 1. Database: follow docs/SUPABASE_SETUP.md (run migrations 001–025 + seed.sql, create demo users)
 # 2. Backend
 cd backend
 python -m venv .venv && .venv\Scripts\activate      # macOS/Linux: source .venv/bin/activate
@@ -95,10 +112,10 @@ For more detail see [docs/API_SETUP.md](docs/API_SETUP.md) (environment variable
 
 | Suite | Count | Command |
 |---|---|---|
-| Backend unit (AI, optimiser, weather fault tolerance, workflow saga, import, API auth) | 57 | `cd backend && pytest` |
-| Backend real-DB (25-way race for the last unit, RLS attacks, full dispatch, failure compensation) | 21 | `TEST_DATABASE_URL=… pytest tests/test_db_*.py` |
-| Frontend unit (offline sync, conflict policy, validation) | 22 | `cd frontend && npm test` |
-| E2E Playwright (auth, roles, lifecycle, concurrent edit, offline, mobile) | 10 | `cd frontend && npx playwright test` |
+| Backend unit (AI, optimiser, weather fault tolerance, workflow saga, import, API auth, notifications) | 80 | `cd backend && pytest` |
+| Backend real-DB (25-way race for the last unit, RLS attacks, areas, identity, full dispatch, failure compensation) | 105 | `TEST_DATABASE_URL=… pytest tests/test_db_*.py` |
+| Frontend unit (offline sync, conflict policy, validation, identity, areas, field crews) | 59 | `cd frontend && npm test` |
+| E2E Playwright (auth, roles, lifecycle, concurrent edit, offline, mobile) | 17 | `cd frontend && npx playwright test` |
 
 ## 7. Data & limitations (honest notes)
 
@@ -110,6 +127,8 @@ For more detail see [docs/API_SETUP.md](docs/API_SETUP.md) (environment variable
 ## 8. Repository layout
 ```
 supabase/migrations/   001 schema · 002 triggers/guards · 003 RLS · 004 RPCs · 005 realtime
+                       006–025 role requests, identity checks, North/South areas, NGO lifecycle,
+                       field crews, admin duties, notifications, analytics (see docs/SUPABASE_SETUP.md)
 supabase/seed.sql      wards, assets, organisations, inventory, ~23k historical events
 backend/app/           FastAPI: ml/ services/ workflow/ api/ core/
 backend/tests/         pytest (unit + real-DB)
