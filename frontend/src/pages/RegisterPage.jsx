@@ -18,7 +18,7 @@ const EMPTY = {
 const JudgesDemoNote = ({ role, label }) => (
   <Link to={`/login?role=${role}`}
     className="mb-4 flex w-full items-center justify-center gap-1.5 rounded-lg bg-brand-50 px-3 py-2 text-center text-sm font-semibold text-brand-800 ring-1 ring-inset ring-brand-200 hover:bg-brand-100">
-    Judges: no sign-up needed. Use a one-click {label} demo account<ArrowRight className="h-4 w-4 shrink-0" aria-hidden />
+    No sign-up needed. Use a one-click {label} demo account<ArrowRight className="h-4 w-4 shrink-0" aria-hidden />
   </Link>
 )
 

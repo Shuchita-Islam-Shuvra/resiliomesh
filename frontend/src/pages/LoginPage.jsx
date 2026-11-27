@@ -171,7 +171,7 @@ export default function LoginPage() {
       {demoOn !== false && (
         <button type="button" onClick={() => document.getElementById('demo-accounts-title')?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
           className="mb-4 flex w-full items-center justify-center gap-1.5 rounded-lg bg-brand-50 px-3 py-2 text-sm font-semibold text-brand-800 ring-1 ring-inset ring-brand-200 hover:bg-brand-100">
-          Judges: one-click {R.label} demo login below, no password needed<ArrowDown className="h-4 w-4" aria-hidden />
+          One-click {R.label} demo login below, no password needed<ArrowDown className="h-4 w-4" aria-hidden />
         </button>
       )}
       <form onSubmit={submit} noValidate className="space-y-5" aria-label={`${R.label} sign in`}>
